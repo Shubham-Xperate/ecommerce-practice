@@ -1,0 +1,31 @@
+# patch-ingress-class.yaml -- prod-only override
+#
+# base/ingress.yaml targets "nginx" (a self-installed ingress-nginx
+# controller, meant for local kind/minikube practice) and a fake local host
+# "ecommerce.local". Real AKS in this POC doesn't have ingress-nginx
+# installed at all -- it already has AKS's own managed "Web App Routing"
+# add-on (ingressClassName: webapprouting.kubernetes.azure.com) instead, so
+# we swap to that here rather than installing a second, redundant controller.
+#
+# The host rule is also removed for now (JSON patch "remove" op) since we
+# don't yet have a real custom domain wired up (no dnsZoneResourceIds
+# configured on the Web App Routing add-on) -- an empty host rule matches
+# ANY Host header, so we can validate over the controller's raw public IP.
+# Once a real domain is set up, a proper host should be reinstated here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+spec:
+  ingressClassName: webapprouting.kubernetes.azure.com
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ecommerce-web
+                port:
+                  number: 80

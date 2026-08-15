@@ -30,3 +30,5 @@ kubectl create secret generic ecommerce-api-secret --namespace ecommerce --from-
 
 kubectl apply -k k8s/overlays/prod --dry-run=server
 kubectl apply -k k8s/overlays/prod 2>&1
+
+cd "backend/src/ECommerce.Api" && dotnet ef database update --connection "Server=localhost,14331;Database=ECommerceDb;User Id=sa;Password=EcomPoc2026!Str0ng;TrustServerCertificate=True;" 2>&1
