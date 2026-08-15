@@ -49,6 +49,7 @@ spec:
       # particular image -- forcing it would break the image's own init
       # logic. (This is a documented exception, not an oversight: this
       # StatefulSet is local-only scaffolding, not a production workload.)
+      serviceAccountName: ecommerce-workload-sa
       containers:
         - name: sqlserver
           image: mcr.microsoft.com/mssql/server:2022-latest
@@ -68,6 +69,9 @@ spec:
           volumeMounts:
             - name: sql-data
               mountPath: /var/opt/mssql
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
           # SQL Server is heavy to boot (several seconds of internal setup on
           # first start). Requests/limits keep it from starving other pods on
           # a small local kind/minikube node while still capping it.
@@ -102,6 +106,19 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+      # Mounting this CSI volume triggers the Secrets Store CSI Driver to
+      # fetch MSSQL_SA_PASSWORD's value from Key Vault and sync it into the
+      # native ecommerce-db-secret Secret referenced above -- see
+      # secretproviderclass.yaml. This is separate from volumeClaimTemplates
+      # below (that's per-pod PERSISTENT storage; this is a CSI-backed,
+      # ephemeral, read-only secret volume -- different mechanism entirely).
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ecommerce-kv-secrets
   # volumeClaimTemplates -- THIS is what makes a StatefulSet different from a
   # Deployment with a PVC: Kubernetes stamps out a UNIQUE PVC per pod
   # ordinal (sql-data-sqlserver-0) and, crucially, re-attaches the SAME PVC

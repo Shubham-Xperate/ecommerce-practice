@@ -26,3 +26,6 @@ kubectl get nodes -o wide
 kubectl create secret generic ecommerce-db-secret --namespace ecommerce --from-literal=sa-password='<a-real-strong-password>' --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl create secret generic ecommerce-api-secret --namespace ecommerce --from-literal=jwt-key='<a-real-32+-char-random-string>' --from-literal=connection-string='Server=sqlserver,1433;Database=ECommerceDb;User Id=sa;Password=<same-real-strong-password>;TrustServerCertificate=True;' --dry-run=client -o yaml | kubectl apply -f - -->
+
+
+kubectl apply -k k8s/overlays/prod --dry-run=server
