@@ -32,6 +32,7 @@ patchesStrategicMerge:
   - patch-api-replicas-resources.yaml
   - patch-web-replicas-resources.yaml
   - patch-ingress-class.yaml
+  - patch-web-service-dns.yaml
 
 # Prod also wants a wider HPA ceiling than base's default already gives us
 # (base is already minReplicas 2 / maxReplicas 6, which happens to suit prod
