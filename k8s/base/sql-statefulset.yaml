@@ -43,12 +43,21 @@ spec:
       labels:
         app.kubernetes.io/name: sqlserver
     spec:
-      # SQL Server's container image runs as a specific mssql user internally
-      # and its setup scripts want to chown/manage /var/opt/mssql themselves,
-      # so unlike the API we do NOT force runAsNonRoot here for this
-      # particular image -- forcing it would break the image's own init
-      # logic. (This is a documented exception, not an oversight: this
-      # StatefulSet is local-only scaffolding, not a production workload.)
+      # As of the current mcr.microsoft.com/mssql/server:2022-latest image,
+      # the container defaults to running as non-root user "mssql" (UID
+      # 10001) -- but SQL Server's own startup script still tries to create
+      # /.system directly under the container's root filesystem, which is
+      # owned root:root (755) and therefore NOT writable by a non-root user.
+      # Confirmed by direct reproduction: `mkdir /.system` as UID 10001 fails
+      # with "Permission denied", exactly matching the CrashLoopBackOff seen
+      # in `kubectl logs --previous`. Forcing runAsUser: 0 here lets that
+      # root-only setup step succeed again; the image's own entrypoint
+      # already handles dropping privileges internally for the actual
+      # database engine process afterward (see the "will run as non-root by
+      # default" log line), so this does not leave sqlservr itself running
+      # as root long-term -- only its own initial setup step needs it.
+      securityContext:
+        runAsUser: 0
       serviceAccountName: ecommerce-workload-sa
       containers:
         - name: sqlserver

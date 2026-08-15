@@ -24,7 +24,7 @@ images:
   - name: youracr.azurecr.io/ecommerce-api
     newName: acrecommercepoc.azurecr.io/ecommerce-api
     newTag: "1.0.0"
-  - name: youracr.azurecr.io/ecommerce-web
+  - name: shubhamxperate/ecommerce-web
     newName: acrecommercepoc.azurecr.io/ecommerce-web
     newTag: "1.0.0"
 

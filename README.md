@@ -29,3 +29,4 @@ kubectl create secret generic ecommerce-api-secret --namespace ecommerce --from-
 
 
 kubectl apply -k k8s/overlays/prod --dry-run=server
+kubectl apply -k k8s/overlays/prod 2>&1
