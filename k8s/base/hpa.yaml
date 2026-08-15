@@ -1,0 +1,46 @@
+# =============================================================================
+# hpa.yaml -- HorizontalPodAutoscaler for the API
+# =============================================================================
+#
+# WHAT this does: watches a metric (CPU utilization here) for the target
+# Deployment and automatically adjusts `.spec.replicas` between minReplicas
+# and maxReplicas to keep that metric near the target -- e.g. if average CPU
+# across api pods climbs above 70% of their REQUESTED cpu, the HPA controller
+# adds more replicas; when load drops, it scales back down (with a built-in
+# cooldown/stabilization window so it doesn't thrash).
+#
+# TWO HARD PREREQUISITES or this silently does nothing useful:
+#   1. metrics-server must be installed in the cluster. This is what
+#      actually collects CPU/memory usage per pod and exposes it via the
+#      `metrics.k8s.io` API that HPA queries. kind and vanilla clusters do
+#      NOT have this by default (minikube: `minikube addons enable
+#      metrics-server`; kind: apply the metrics-server manifest with
+#      --kubelet-insecure-tls). Without it, `kubectl get hpa` will show
+#      <unknown> under TARGETS forever.
+#   2. The target container MUST have `resources.requests.cpu` set (see
+#      api-deployment.yaml). "70% utilization" is 70% OF THE REQUEST, not of
+#      the node or of the limit -- an HPA target with no request defined has
+#      no denominator to compute a percentage against.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ecommerce-api-hpa
+  namespace: ecommerce
+  labels:
+    app: ecommerce-api-hpa
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ecommerce-api
+  minReplicas: 2 # never scale below this even at zero load -- keeps some redundancy always
+  maxReplicas: 6 # hard ceiling so a runaway feedback loop / traffic spike can't unboundedly consume cluster capacity
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70 # scale out once average CPU across all api pods exceeds 70% of requested cpu
+

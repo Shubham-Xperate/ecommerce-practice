@@ -1,0 +1,12 @@
+# JSON6902 (RFC 6902) patch -- a list of explicit operations against exact
+# paths in the target document. Used here (instead of strategic-merge)
+# because we're replacing specific scalar fields (minReplicas/maxReplicas)
+# and it reads unambiguously as "replace exactly these two values", with no
+# risk of Kustomize's strategic-merge list-handling rules doing something
+# unexpected to the `metrics` array we're NOT touching.
+- op: replace
+  path: /spec/minReplicas
+  value: 1
+- op: replace
+  path: /spec/maxReplicas
+  value: 2

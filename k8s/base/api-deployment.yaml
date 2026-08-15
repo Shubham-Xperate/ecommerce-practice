@@ -1,0 +1,130 @@
+# =============================================================================
+# api-deployment.yaml -- the .NET 8 Web API
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-api
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  # Base default; overlays patch this (dev=1, prod=3). A Deployment's whole
+  # job is reconciling "however many replicas you ask for", so this number is
+  # the main lever environments pull.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ecommerce-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ecommerce-api
+    spec:
+      # Pod-level security posture. `runAsNonRoot: true` tells the kubelet to
+      # REFUSE to start the container if its image tries to run as UID 0 --
+      # this is a defense-in-depth control: even if an attacker gets RCE in
+      # the API process, they land as an unprivileged user, not root, which
+      # blocks a huge class of container-breakout techniques. The official
+      # ASP.NET runtime images already default to a non-root "app" user
+      # (UID 64198 on the -noble/-jammy variants), so this should just work;
+      # if your custom image doesn't set a USER, this field will make the
+      # pod fail to start (which is the point -- fail loudly, not silently
+      # run as root).
+      securityContext:
+        runAsNonRoot: true
+        # Must match the numeric UID/GID the image's appuser is created with
+        # (backend/Dockerfile) -- runAsNonRoot alone isn't enough for kubelet
+        # to verify non-root without also being told which UID to expect.
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: api
+          # Kustomize overlays override this via `images:` transformer, so
+          # the tag here is just the base/default -- do not hardcode a real
+          # version expecting it to stick; overlays are the source of truth.
+          image: youracr.azurecr.io/ecommerce-api:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          # --- Bulk, non-secret config -----------------------------------
+          # Every key in the ConfigMap becomes an env var automatically. This
+          # is convenient but means anyone adding a new ConfigMap key also
+          # silently adds a new env var here -- acceptable trade-off for a
+          # ConfigMap that's entirely non-sensitive, deliberately kept small.
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          # --- Individually-selected secret values -------------------------
+          # Unlike envFrom, secretKeyRef pulls exactly ONE key per entry.
+          # This is intentional friction: it forces whoever adds a new secret
+          # to explicitly wire it here, so secrets can never leak into a pod
+          # "by accident" the way a bulk `envFrom: secretRef` might.
+          env:
+            - name: Jwt__Key
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-api-secret
+                  key: jwt-key
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-api-secret
+                  key: connection-string
+          # --- Resource requests vs limits ----------------------------------
+          # requests = what the scheduler guarantees/reserves on a node when
+          #            deciding where this pod can fit. This is also the
+          #            number the HPA's "70% CPU" target is a percentage OF
+          #            (see hpa.yaml) -- without requests set, HPA has no
+          #            baseline to compute utilization against and simply
+          #            will not work.
+          # limits   = the hard ceiling the kernel/cgroups enforce. Exceeding
+          #            the memory limit gets the container OOMKilled;
+          #            exceeding the CPU limit just throttles it (CPU is
+          #            "compressible", memory is not -- that's why there's no
+          #            such thing as an OOM-kill equivalent for CPU).
+          # requests < limits (a "burstable" QoS pod) lets a pod use spare
+          # node capacity when available while still guaranteeing a floor and
+          # capping worst-case usage, which is the right default for a web
+          # API with bursty traffic.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # --- Readiness vs Liveness: these ARE NOT the same thing ----------
+          # READINESS (`/health`, checks DB connectivity too): controls
+          # whether this pod's IP is added to the `ecommerce-api` Service's
+          # endpoint list. If the DB is down, we want THIS pod pulled out of
+          # rotation (so users hit a pod that isn't broken, or an appropriate
+          # 5xx from an Ingress) -- but we do NOT want Kubernetes to kill and
+          # restart the pod, because restarting the API does nothing to fix
+          # a downed database, and would just cause a crash-loop storm.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # LIVENESS (`/health/live`, process-only, no DB): controls whether
+          # Kubernetes decides the container is wedged/deadlocked and should
+          # be KILLED and restarted. This deliberately does NOT check the DB
+          # -- if it did, a database outage would cause Kubernetes to kill
+          # and restart every single API pod in a loop, which helps nobody
+          # and can even prevent the DB from ever catching up once it
+          # recovers (thundering herd of reconnects). Liveness should only
+          # ever answer "is my own process still functioning", never "are my
+          # downstream dependencies healthy".
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3

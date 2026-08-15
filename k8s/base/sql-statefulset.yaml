@@ -1,0 +1,150 @@
+# =============================================================================
+# sql-statefulset.yaml -- SQL Server 2022 for LOCAL PRACTICE ONLY.
+# =============================================================================
+#
+#   *** THIS IS NOT WHAT PRODUCTION USES ***
+#
+#   In production (AKS), the API talks to a managed Azure SQL Database
+#   reached over a Private Endpoint (private IP inside the VNet, no public
+#   exposure, backups/HA/patching handled by Azure). That is provisioned by
+#   this project's Terraform, not by Kubernetes manifests at all -- a
+#   database is stateful, operationally expensive to run well (backups, HA,
+#   patching, failover), and Azure SQL does all of that for us.
+#
+#   Running SQL Server *inside* the cluster as a StatefulSet exists here only
+#   so you can `kind create cluster` / `minikube start` and have a fully
+#   working app with zero Azure spend while you learn. It has no backups, no
+#   HA (replicas: 1 always), and its data lives on a local PVC that a real
+#   node failure would destroy. Never point real users at this.
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sqlserver
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: sqlserver
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  # StatefulSets require a "governing" headless Service (see below) that gives
+  # each pod a stable network identity: sqlserver-0.sqlserver.ecommerce.svc.cluster.local
+  serviceName: sqlserver
+  # Always 1 for this lab. SQL Server doesn't support multiple writers off a
+  # single StatefulSet like this (that needs Always On Availability Groups,
+  # which is way beyond a local practice setup) -- scaling this replicas
+  # field would just create sqlserver-1 with its own EMPTY disk, not a
+  # replica of sqlserver-0's data.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sqlserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sqlserver
+    spec:
+      # SQL Server's container image runs as a specific mssql user internally
+      # and its setup scripts want to chown/manage /var/opt/mssql themselves,
+      # so unlike the API we do NOT force runAsNonRoot here for this
+      # particular image -- forcing it would break the image's own init
+      # logic. (This is a documented exception, not an oversight: this
+      # StatefulSet is local-only scaffolding, not a production workload.)
+      containers:
+        - name: sqlserver
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          ports:
+            - containerPort: 1433
+              name: tds
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: "Developer" # free, full-featured, non-production-licensed edition -- perfect for a lab
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-db-secret
+                  key: sa-password
+          volumeMounts:
+            - name: sql-data
+              mountPath: /var/opt/mssql
+          # SQL Server is heavy to boot (several seconds of internal setup on
+          # first start). Requests/limits keep it from starving other pods on
+          # a small local kind/minikube node while still capping it.
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          # readiness/liveness use sqlcmd to actually attempt a login, which
+          # is the only reliable way to know SQL Server is truly accepting
+          # connections (the process can be "up" for a while before the TDS
+          # listener is ready).
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+  # volumeClaimTemplates -- THIS is what makes a StatefulSet different from a
+  # Deployment with a PVC: Kubernetes stamps out a UNIQUE PVC per pod
+  # ordinal (sql-data-sqlserver-0) and, crucially, re-attaches the SAME PVC
+  # to the SAME pod identity if it's rescheduled, so data survives pod
+  # restarts (though not node/disk loss on most local setups without a
+  # proper storage class).
+  volumeClaimTemplates:
+    - metadata:
+        name: sql-data
+      spec:
+        accessModes: ["ReadWriteOnce"] # a single node mounts this disk at a time -- normal for block storage
+        resources:
+          requests:
+            storage: 5Gi
+---
+# Headless Service (clusterIP: None) for the StatefulSet.
+#
+# WHY headless? A normal ClusterIP Service load-balances across all matching
+# pods behind one virtual IP -- meaningless (and actively harmful) for a
+# stateful, single-writer database where clients need to reach a SPECIFIC
+# pod's stable DNS name, not "whichever replica happened to answer". A
+# headless Service instead makes DNS return the individual pod A-records
+# (sqlserver-0.sqlserver.ecommerce.svc.cluster.local), which is what
+# StatefulSets are designed to be paired with.
+#
+# The API's connection string in secret.example.yaml uses `sqlserver` (the
+# Service name) directly rather than `sqlserver-0.sqlserver...` because with
+# only one replica the plain Service name resolves fine too and is simpler
+# to read as a teaching example; feel free to switch to the per-pod DNS name
+# if you ever scale this out.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlserver
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: sqlserver
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  clusterIP: None # <-- this is what makes it "headless"
+  selector:
+    app.kubernetes.io/name: sqlserver
+  ports:
+    - port: 1433
+      targetPort: 1433
+      name: tds

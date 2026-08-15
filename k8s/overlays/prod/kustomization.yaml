@@ -1,0 +1,50 @@
+# kustomization.yaml (prod overlay)
+#
+# `prod` = what (eventually) runs on AKS: more replicas for real redundancy,
+# higher resource ceilings for real traffic, an image tag PINNED to a
+# specific semantic version (never a floating tag -- you want prod rollouts
+# to be explicit, reproducible, and easy to roll back to a known-good
+# version, not "whatever `latest` happens to mean today"), and a
+# PodDisruptionBudget so voluntary disruptions (node drains during AKS
+# upgrades, cluster-autoscaler scale-down, `kubectl drain`) can't take out
+# too many API pods at once.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - pdb.yaml # new resource that doesn't exist in base at all -- prod-only
+
+# Pin to an explicit released version. Replace `1.0.0` with whatever your CI
+# actually tags and pushes for a real release; the point is this value
+# should be a deliberate, reviewed change (e.g. via a PR bumping this file),
+# not something that silently drifts the way a `:latest` or `:prod` moving
+# tag would.
+images:
+  - name: youracr.azurecr.io/ecommerce-api
+    newName: acrecommercepoc.azurecr.io/ecommerce-api
+    newTag: "1.0.0"
+  - name: youracr.azurecr.io/ecommerce-web
+    newName: acrecommercepoc.azurecr.io/ecommerce-web
+    newTag: "1.0.0"
+
+patchesStrategicMerge:
+  - patch-api-replicas-resources.yaml
+  - patch-web-replicas-resources.yaml
+
+# Prod also wants a wider HPA ceiling than base's default already gives us
+# (base is already minReplicas 2 / maxReplicas 6, which happens to suit prod
+# fine) -- left as an explicit patch file anyway so it's obvious where you'd
+# tune this further (e.g. maxReplicas: 12) as real traffic data comes in.
+patches:
+  - path: patch-hpa-prod.yaml
+    target:
+      group: autoscaling
+      version: v2
+      kind: HorizontalPodAutoscaler
+      name: ecommerce-api-hpa
+
+labels:
+  - pairs:
+      environment: prod
+    includeSelectors: false

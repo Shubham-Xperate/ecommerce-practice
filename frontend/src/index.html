@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ecommerce Web</title>
+  <base href="/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+
+  <!--
+    This must load BEFORE the Angular main bundle executes, because it sets
+    window.__env, which ConfigService reads synchronously when the app
+    bootstraps. It is a plain, un-bundled JS file (not processed by the
+    Angular/webpack build) so that it can be freely overwritten at container
+    startup (see docker-entrypoint.sh) or replaced via a mounted Kubernetes
+    ConfigMap - repointing the already-built app at a different backend URL
+    without recompiling any TypeScript.
+  -->
+  <script src="assets/env.js"></script>
+</head>
+<body>
+  <app-root></app-root>
+</body>
+</html>

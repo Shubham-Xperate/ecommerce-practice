@@ -1,0 +1,46 @@
+# configmap.yaml
+#
+# WHY a ConfigMap separate from Secrets?
+# - ConfigMaps are for NON-sensitive configuration: it's fine for this data to
+#   show up in `kubectl describe`, logs, or a git-committed manifest. Secrets
+#   (base64-encoded, and in production ideally encrypted-at-rest + backed by
+#   Key Vault) are reserved for things that grant access (passwords, keys).
+# - Splitting the two also lets us mount/inject them differently: this whole
+#   ConfigMap is loaded in bulk via `envFrom` in api-deployment.yaml, while
+#   secret values are pulled in one-by-one via `secretKeyRef` so we never
+#   accidentally bulk-inject a stray secret key as a plain env var.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-config
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-config
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+data:
+  # --- Backend (.NET 8 Web API) settings -------------------------------------
+  # Controls ASP.NET Core's environment-specific behavior (dev exception pages,
+  # appsettings.{Environment}.json overlay, Swagger UI enabled/disabled, etc).
+  # Overridden per-overlay: dev overlay could set "Development", prod sets
+  # "Production" (this base default is the safe "Production" so nobody
+  # accidentally ships base as-is with dev diagnostics on).
+  ASPNETCORE_ENVIRONMENT: "Production"
+  # CORS allow-list for the API. Must match the scheme+host the browser sends
+  # as `Origin` when the Angular app calls the API. In this architecture the
+  # nginx frontend proxies /api/* same-origin, so CORS mostly matters for
+  # local `ng serve` dev workflows hitting the API directly.
+  Cors__AllowedOrigin: "http://ecommerce.local"
+  # JWT issuer/audience -- must match what the API puts in tokens it mints AND
+  # what it expects when validating incoming tokens. Not secret (they're
+  # sent in plaintext as JWT claims already), but wrong values here cause
+  # silent 401s, so they live in one place for both sides to reference.
+  Jwt__Issuer: "https://ecommerce.local"
+  Jwt__Audience: "https://ecommerce.local"
+  # --- Frontend (nginx + Angular) settings -----------------------------------
+  # Consumed by the web image's docker-entrypoint.sh at container start to
+  # regenerate assets/env.js (a small runtime-config shim so the same built
+  # Angular bundle can point at different API URLs without a rebuild -- this
+  # is the standard "config injection" pattern for SPAs baked into static
+  # images). Defaults to a relative path so it always resolves against
+  # whatever host/port the browser used to load the page.
+  API_URL: "/api"

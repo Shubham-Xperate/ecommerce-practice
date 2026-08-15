@@ -1,0 +1,143 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  background: #f5f6f8;
+  color: #1f2430;
+}
+
+a {
+  color: #2358c8;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+nav.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1f2430;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+}
+
+nav.navbar .brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #fff;
+}
+
+nav.navbar .links {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+nav.navbar .links a,
+nav.navbar .links button {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+button, .btn {
+  background: #2358c8;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+button:hover, .btn:hover {
+  background: #1c469e;
+}
+
+button:disabled {
+  background: #9aa5b8;
+  cursor: not-allowed;
+}
+
+button.secondary, .btn.secondary {
+  background: #6b7280;
+}
+
+button.danger, .btn.danger {
+  background: #c0392b;
+}
+
+input, select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #cbd2de;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+table th, table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #e0e3e9;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e0e3e9;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  max-width: 360px;
+}
+
+.error {
+  color: #c0392b;
+  font-size: 0.9rem;
+}
+
+.success {
+  color: #1e7e34;
+  font-size: 0.9rem;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.pagination {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 1rem;
+}

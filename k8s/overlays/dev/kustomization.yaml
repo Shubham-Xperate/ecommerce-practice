@@ -1,0 +1,60 @@
+# kustomization.yaml (dev overlay)
+#
+# `dev` = what you run on a local kind/minikube cluster on a laptop: fewer
+# replicas (less CPU/RAM pressure on a local machine), a floating `dev`
+# image tag (rebuild-and-redeploy-often workflow), and no PodDisruptionBudget
+# (nothing to "disrupt" gracefully when you'll happily just `kubectl delete
+# pod` yourself while iterating).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Pull in every resource from base unmodified, then apply the patches below
+# on top. This is the core Kustomize idea: don't copy-paste manifests
+# per-environment, patch the differences.
+resources:
+  - ../../base
+
+# Pin both app images to a `dev` tag. In this lab's CI, every push to a
+# feature/dev branch would build+push `:dev` (or a `:dev-<sha>` you retag as
+# `:dev`), so `dev` always means "whatever's newest for local testing" --
+# deliberately floating/mutable, unlike prod's pinned semver.
+images:
+  - name: youracr.azurecr.io/ecommerce-api
+    newName: shubhamxperate/ecommerce-api
+    newTag: latest
+  - name: youracr.azurecr.io/ecommerce-web
+    newName: shubhamxperate/ecommerce-web
+    newTag: latest
+
+# Strategic-merge patches: each file below is a PARTIAL manifest -- Kustomize
+# merges only the fields present onto the matching base resource (matched by
+# apiVersion+kind+metadata.name), leaving everything else from base intact.
+patchesStrategicMerge:
+  - patch-api-replicas-resources.yaml
+  - patch-web-replicas-resources.yaml
+  - patch-configmap-dev.yaml
+
+# JSON6902 patch for the HPA: strategic-merge patches can't easily target a
+# single element inside a list (like `spec.metrics[0]`) or reduce a range
+# like minReplicas/maxReplicas without restating the whole metrics array, so
+# we use an explicit path-based patch here instead. Local dev has no
+# real load, so we don't need up to 6 replicas or a full HPA range -- keep
+# it small to match the smaller fixed replica counts above.
+patches:
+  - path: patch-hpa-dev.yaml
+    target:
+      group: autoscaling
+      version: v2
+      kind: HorizontalPodAutoscaler
+      name: ecommerce-api-hpa
+
+# Overlay-specific namespace-scoped label so `kubectl get pods -l
+# environment=dev -A` can distinguish dev-deployed resources from prod ones
+# if you ever run both against the same cluster (e.g. two kind clusters, or
+# testing namespace isolation).
+labels:
+  - pairs:
+      environment: dev
+    includeSelectors: false
+
+

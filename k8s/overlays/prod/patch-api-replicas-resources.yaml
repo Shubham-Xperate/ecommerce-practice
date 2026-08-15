@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api
+  namespace: ecommerce
+spec:
+  # Baseline redundancy for prod: 3 means we can lose one pod (node failure,
+  # rolling update, drain) and still have 2 serving traffic, which also
+  # satisfies the PDB's `minAvailable: 2` below with one pod to spare.
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: api
+          # Real traffic gets real headroom. These numbers are still
+          # placeholders -- in an actual production rollout you'd derive
+          # them from load testing / observed p95 usage, then set requests
+          # close to typical usage and limits with enough headroom to absorb
+          # bursts without OOM-killing.
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

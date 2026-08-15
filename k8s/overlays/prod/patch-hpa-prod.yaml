@@ -1,0 +1,9 @@
+# Explicit (even though it currently matches base's own defaults) so a
+# future reader immediately sees "prod's HPA ceiling is a deliberate,
+# independently-set value", not an accident of inheriting base.
+- op: replace
+  path: /spec/minReplicas
+  value: 3
+- op: replace
+  path: /spec/maxReplicas
+  value: 6

@@ -1,0 +1,46 @@
+<h1>Your Cart</h1>
+
+<p *ngIf="successOrderId !== null" class="success">
+  Order #{{ successOrderId }} placed successfully!
+  <a routerLink="/orders">View your orders</a>
+</p>
+
+<p *ngIf="error" class="error">{{ error }}</p>
+
+<div *ngIf="items.length === 0 && successOrderId === null" class="muted">
+  Your cart is empty. <a routerLink="/">Browse the catalog</a>.
+</div>
+
+<table *ngIf="items.length > 0">
+  <thead>
+    <tr>
+      <th>Product</th>
+      <th>Price</th>
+      <th>Quantity</th>
+      <th>Subtotal</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr *ngFor="let item of items">
+      <td>{{ item.product.name }}</td>
+      <td>{{ item.product.price | number: '1.2-2' }}</td>
+      <td>
+        <input
+          type="number"
+          min="1"
+          [ngModel]="item.quantity"
+          (ngModelChange)="updateQuantity(item.product.id, $event)"
+        />
+      </td>
+      <td>{{ item.product.price * item.quantity | number: '1.2-2' }}</td>
+      <td><button class="danger" (click)="remove(item.product.id)">Remove</button></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 *ngIf="items.length > 0">Total: {{ total | number: '1.2-2' }}</h3>
+
+<button *ngIf="items.length > 0" (click)="checkout()" [disabled]="submitting">
+  {{ submitting ? 'Placing order...' : 'Checkout' }}
+</button>

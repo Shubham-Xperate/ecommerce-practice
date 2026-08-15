@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: ecommerce-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:?set SA_PASSWORD in .env}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"          # exposed to the host only for local debugging (SSMS/Azure Data Studio)
+    volumes:
+      - sqlserver-data:/var/opt/mssql   # named volume = data survives `docker compose down` (not `-v`)
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
+  ecommerce-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ecommerce-api
+    ports:
+      - "5000:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+        ASPNETCORE_ENVIRONMENT: "Development"
+      # Double-underscore syntax is ASP.NET Core's convention for mapping
+      # environment variables onto nested appsettings.json keys, e.g.
+      # ConnectionStrings__DefaultConnection -> ConnectionStrings:DefaultConnection
+        ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=ECommerceDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True;"
+        Jwt__Key: "${JWT_KEY:?set JWT_KEY in .env (min 32 chars)}"
+        Jwt__Issuer: "ecommerce-local"
+        Jwt__Audience: "ecommerce-local-clients"
+        Cors__AllowedOrigin: "http://localhost:4200"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - ecommerce-net
+
+  ecommerce-web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ecommerce-web
+    depends_on:
+      - ecommerce-api
+    environment:
+      # Consumed by docker-entrypoint.sh, which regenerates assets/env.js
+      # from this value at container startup — see docs/03-angular-frontend.md
+      # for why Angular needs this "runtime config" workaround at all.
+      API_URL: "/api"
+    ports:
+      - "4200:8080"           # browse to http://localhost:4200
+    networks:
+      - ecommerce-net
+
+networks:
+  ecommerce-net:
+    driver: bridge
+
+volumes:
+  sqlserver-data:          

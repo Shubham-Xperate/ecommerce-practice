@@ -1,0 +1,13 @@
+# Strategic-merge patch: overrides just this one key on top of base's
+# ecommerce-config ConfigMap. Development mode makes Program.cs auto-run
+# `db.Database.Migrate()` on API startup, which is what actually creates the
+# EcommerceDb database on a fresh local SQL Server -- without this, the DB
+# never gets created and every connection fails with a misleading
+# "Login failed for user 'sa'" error.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-config
+  namespace: ecommerce
+data:
+  ASPNETCORE_ENVIRONMENT: "Development"
