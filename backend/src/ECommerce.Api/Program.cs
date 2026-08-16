@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -175,6 +176,11 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// UseHttpMetrics BEFORE other middleware so it wraps every request -
+// including ones that fail auth or get short-circuited later - and records
+// their duration/count/status code as Prometheus metrics automatically.
+app.UseHttpMetrics();
+
 app.UseCors(CorsPolicyName);
 
 app.UseAuthentication();
@@ -205,6 +211,15 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = _ => false
 });
+
+// ---------------------------------------------------------------------------
+// Prometheus metrics endpoint - returns everything UseHttpMetrics has
+// recorded so far (HTTP request counts/durations/status codes, plus default
+// .NET runtime metrics like GC and thread-pool stats) in Prometheus's plain
+// text exposition format. A ServiceMonitor (see helm/ecommerce-chart) tells
+// Prometheus to scrape this path on a timer - nothing pushes data out from
+// here, this endpoint just answers whenever it's asked.
+app.MapMetrics();
 
 // No hardcoded URL here: the port is controlled entirely by ASPNETCORE_URLS,
 // set to http://+:8080 by the Dockerfile/Kubernetes Deployment in containers,

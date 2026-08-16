@@ -68,3 +68,6 @@ helm upgrade monitoring prometheus-community/kube-prometheus-stack -n monitoring
 helm/values-monitoring.yaml
 
 kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9090:9090
+
+az acr login -n acrecommercepoc 2>&1
+docker push acrecommercepoc.azurecr.io/ecommerce-api:1.1.0

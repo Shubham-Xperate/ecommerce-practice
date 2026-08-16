@@ -4,6 +4,7 @@ metadata:
   name: ecommerce-api
   namespace: {{ .Values.namespace }}
   labels:
+    ecommerce.io/component: api
     {{- include "ecommerce-chart.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
