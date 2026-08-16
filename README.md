@@ -48,9 +48,23 @@ helm repo list
 helm install argocd argo/argo-cd -n argocd --create-namespace -f helm/values-argocd.yaml 
 
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
 kubectl port-forward service/argocd-server -n argocd 8080:443
 
 
 kubectl apply -f argocd/project.yaml -f argocd/application.yaml 
 kubectl get application ecommerce -n argocd -o wide
 kubectl port-forward service/argocd-server -n argocd 8080:443
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update prometheus-community 
+
+helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace -f helm/values-monitoring.yaml
+
+helm list -n monitoring
+kubectl get all -n monitoring
+helm uninstall monitoring -n monitoring
+helm upgrade monitoring prometheus-community/kube-prometheus-stack -n monitoring -f 
+helm/values-monitoring.yaml
+
+kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9090:9090

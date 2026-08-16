@@ -1,0 +1,87 @@
+# Resource request/limit overrides for prometheus-community/kube-prometheus-stack.
+# Same reason as helm/values-argocd.yaml: this cluster's Azure Policy
+# (Gatekeeper) rejects any container with no resource requests, and this
+# chart ships several of its containers/init-jobs with empty `{}` defaults.
+#
+# The `enabled: false` blocks below are NOT optional cost-cutting -- each is
+# a genuine structural incompatibility with AKS, confirmed live:
+#   - kubeControllerManager/kubeScheduler/kubeEtcd/kubeProxy/coreDns: this
+#     chart tries to create Services in kube-system to scrape the
+#     Kubernetes control plane directly. On AKS the control plane isn't
+#     even running as visible pods in your cluster (Microsoft-managed,
+#     hidden) -- these Services would have nothing real to scrape even if
+#     AKS's "protect-system-namespaces" policy allowed creating them (it
+#     doesn't).
+#   - nodeExporter: needs HostPath mounts (/proc, /sys, /) to read raw
+#     node-level hardware metrics -- AKS's baseline security policy
+#     forbids HostPath volumes outright (a classic container-escape
+#     vector), except read-only /var/log.
+#   - admissionWebhooks: creating/patching a MutatingWebhookConfiguration
+#     is restricted to trusted system principals on AKS, same category of
+#     restriction as the ClusterRole/CRD lockdowns we hit with ArgoCD.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+coreDns:
+  enabled: false
+nodeExporter:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+  # Disabled entirely: creating/patching a MutatingWebhookConfiguration is
+  # restricted to trusted system principals on AKS (confirmed live) -- this
+  # only validates Prometheus/Alertmanager custom resources for correctness,
+  # not required for the stack to actually function.
+  admissionWebhooks:
+    enabled: false
+  # Separate toggle from admissionWebhooks above -- this controls whether
+  # the operator sets up its OWN internal TLS server at all. Confirmed live:
+  # leaving this on (the chart's default) still tries to mount a TLS secret
+  # that only the (now-disabled) admissionWebhooks job would have created,
+  # causing FailedMount forever. Disabling it removes that dependency
+  # entirely, since we don't need the operator's internal webhook server if
+  # nothing is ever going to register it cluster-wide anyway.
+  tls:
+    enabled: false
+  prometheusConfigReloader:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { cpu: 50m, memory: 64Mi }
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+
+prometheus:
+  prometheusSpec:
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { cpu: 500m, memory: 1Gi }
+
+thanosRuler:
+  thanosRulerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+
+grafana:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
