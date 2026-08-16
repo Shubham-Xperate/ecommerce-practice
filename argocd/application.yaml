@@ -27,6 +27,22 @@ spec:
     server: "https://kubernetes.default.svc"
     namespace: ecommerce
 
+  # AKS's own "deployment safeguards" admission webhook injects
+  # affinity/topologySpreadConstraints onto every Deployment's pod spec at
+  # creation time -- fields that don't exist in our chart's own templates at
+  # all. Without this, ArgoCD would report a PERMANENT, unfixable OutOfSync
+  # diff on ecommerce-api/ecommerce-web forever (confirmed live: the actual
+  # object has these fields, the chart genuinely doesn't, and re-syncing
+  # doesn't remove them -- AKS just re-adds them). This tells ArgoCD's diff
+  # to ignore exactly these two JSON paths for Deployments, without
+  # affecting any other field comparison.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/template/spec/affinity
+        - /spec/template/spec/topologySpreadConstraints
+
   syncPolicy:
     automated:
       # If a commit removes something from the chart, delete it from the

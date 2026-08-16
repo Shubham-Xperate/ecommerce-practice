@@ -56,7 +56,7 @@ web:
   image:
     repository: ecommerce-web
     tag: "1.0.0"
-  replicaCount: 4
+  replicaCount: 6
   service:
     # LoadBalancer (not ClusterIP) is what makes the dnsLabel below possible
     # -- a free Azure-provided hostname, at the cost of a SECOND, separate
