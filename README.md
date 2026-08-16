@@ -53,3 +53,4 @@ kubectl port-forward service/argocd-server -n argocd 8080:443
 
 kubectl apply -f argocd/project.yaml -f argocd/application.yaml 
 kubectl get application ecommerce -n argocd -o wide
+kubectl port-forward service/argocd-server -n argocd 8080:443
