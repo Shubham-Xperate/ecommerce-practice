@@ -1,0 +1,53 @@
+# Templated equivalent of k8s/base/web-deployment.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      ecommerce.io/component: web
+  template:
+    metadata:
+      labels:
+        ecommerce.io/component: web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      containers:
+        - name: web
+          image: "{{ .Values.image.registry }}/{{ .Values.web.image.repository }}:{{ .Values.web.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecommerce-config
+                  key: API_URL
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3

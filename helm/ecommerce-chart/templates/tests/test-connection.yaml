@@ -1,7 +1,11 @@
+# `helm test` runs this Pod on demand (not during install/upgrade) and
+# reports pass/fail based on its exit code -- a quick post-deploy smoke test
+# that the web Service is actually reachable in-cluster.
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ include "ecommerce-chart.fullname" . }}-test-connection"
+  name: "ecommerce-chart-test-connection"
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "ecommerce-chart.labels" . | nindent 4 }}
   annotations:
@@ -9,7 +13,14 @@ metadata:
 spec:
   containers:
     - name: wget
-      image: busybox
+      image: busybox:1.36
       command: ['wget']
-      args: ['{{ include "ecommerce-chart.fullname" . }}:{{ .Values.service.port }}']
+      args: ['ecommerce-web:80']
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
   restartPolicy: Never

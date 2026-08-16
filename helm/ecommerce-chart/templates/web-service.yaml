@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+  {{- with .Values.web.service.dnsLabel }}
+  annotations:
+    # Free Azure-provided hostname (<label>.<region>.cloudapp.azure.com).
+    # AKS's own cloud-provider component performs this Azure write on our
+    # behalf -- see git history for why a direct `az network public-ip
+    # update` on an AKS-managed IP is blocked (NRG lockdown) while this
+    # Kubernetes-native path is not. NOTE: this is a SEPARATE public IP from
+    # the Web App Routing Ingress's own IP, so it bypasses Ingress entirely
+    # -- a known, deliberate trade-off, revisit once a real owned domain is
+    # wired up via Web App Routing's dnsZoneResourceIds instead.
+    service.beta.kubernetes.io/azure-dns-label-name: {{ . }}
+  {{- end }}
+spec:
+  type: {{ .Values.web.service.type }}
+  selector:
+    ecommerce.io/component: web
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http

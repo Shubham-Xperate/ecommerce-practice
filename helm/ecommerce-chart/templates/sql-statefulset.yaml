@@ -1,0 +1,102 @@
+# Templated equivalent of k8s/base/sql-statefulset.yaml -- see that file's
+# comments for the full explanation of the headless Service, PVC-per-pod
+# behavior, and WHY runAsUser: 0 is required (a real, confirmed root cause:
+# the image's non-root default user lacks write access to `/`, which its own
+# startup script needs to create /.system -- see git history for the full
+# investigation).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sqlserver
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  serviceName: sqlserver
+  replicas: 1
+  selector:
+    matchLabels:
+      ecommerce.io/component: sqlserver
+  template:
+    metadata:
+      labels:
+        ecommerce.io/component: sqlserver
+    spec:
+      securityContext:
+        runAsUser: 0
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: sqlserver
+          image: {{ .Values.sql.image }}
+          ports:
+            - containerPort: 1433
+              name: tds
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: "Developer"
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-db-secret
+                  key: sa-password
+          volumeMounts:
+            - name: sql-data
+              mountPath: /var/opt/mssql
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+          resources:
+            {{- toYaml .Values.sql.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ .Values.keyVault.secretProviderClassName }}
+  volumeClaimTemplates:
+    - metadata:
+        name: sql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.sql.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlserver
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    ecommerce.io/component: sqlserver
+  ports:
+    - port: 1433
+      targetPort: 1433
+      name: tds
