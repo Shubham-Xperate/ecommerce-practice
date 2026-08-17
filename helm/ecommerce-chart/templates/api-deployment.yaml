@@ -59,6 +59,21 @@ spec:
       labels:
         ecommerce.io/component: api
     spec:
+      # AKS's "deployment safeguards" mutating webhook auto-adds this for
+      # plain apps/v1 Deployments/StatefulSets, but confirmed live (via the
+      # argo-rollouts controller's own logs) it does NOT recognize this
+      # custom Rollout CRD's pod template. The SEPARATE validating policy
+      # requiring podAntiAffinity/topologySpreadConstraints on any 2+
+      # replica ReplicaSet still applies regardless of what created it, so
+      # we write it out ourselves here instead of relying on the
+      # auto-mutation other workloads get for free.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              ecommerce.io/component: api
       serviceAccountName: {{ .Values.serviceAccount.name }}
       securityContext:
         runAsNonRoot: true
