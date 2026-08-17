@@ -8,8 +8,12 @@ metadata:
     {{- include "ecommerce-chart.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    # Was "apps/v1 Deployment" -- ecommerce-api is now an Argo Rollouts
+    # Rollout (see api-deployment.yaml), which supports being an HPA scale
+    # target exactly like a Deployment does, just under this different
+    # apiVersion/kind pair.
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: ecommerce-api
   minReplicas: {{ .Values.api.hpa.minReplicas }}
   maxReplicas: {{ .Values.api.hpa.maxReplicas }}

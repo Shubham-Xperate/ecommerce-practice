@@ -8,6 +8,18 @@ metadata:
     {{- include "ecommerce-chart.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.web.replicaCount }}
+  # Explicit Rolling Update, deliberately spelled out (not left as
+  # Kubernetes' silent 25%/25% default) so its pod-by-pod behavior is
+  # observable and inspectable, not invisible. With replicas: 3:
+  #   maxSurge: 1        -> at most 1 EXTRA pod beyond 3 during rollout (4 total, briefly)
+  #   maxUnavailable: 0  -> never drop below 3 READY pods -> zero-downtime
+  # Sequence per pod: create 1 new (4 total) -> wait Ready -> remove 1 old
+  # (back to 3) -> repeat until all 3 are the new version.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       ecommerce.io/component: web

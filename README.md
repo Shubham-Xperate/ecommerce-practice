@@ -78,3 +78,5 @@ kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-s
 kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
 
 az extension add --name azure-devops --yes
+
+helm install argo-rollouts argo/argo-rollouts -n argo-rollouts --create-namespace -f helm/values-argo-rollouts.yaml 2>&1 | tail -20

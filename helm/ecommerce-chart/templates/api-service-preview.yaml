@@ -1,0 +1,27 @@
+# Only relevant/created when .Values.api.strategy is "blueGreen" -- this is
+# the "preview" side of blue-green: a SEPARATE Service that always points
+# at whatever the NEW ("preview") version currently is, distinct from
+# ecommerce-api (the "active" Service real traffic uses). The Argo
+# Rollouts controller automatically manages the actual pod-selecting
+# behavior of both Services at runtime (patching in a rollouts-pod-
+# template-hash label behind the scenes) once it sees them referenced as
+# activeService/previewService in the Rollout's blueGreen strategy -- we
+# only need to declare the Service objects themselves, not that logic.
+{{- if eq .Values.api.strategy "blueGreen" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api-preview
+  namespace: {{ .Values.namespace }}
+  labels:
+    ecommerce.io/component: api
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    ecommerce.io/component: api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+{{- end }}

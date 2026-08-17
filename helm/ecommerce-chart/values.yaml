@@ -51,6 +51,23 @@ api:
     targetCPUUtilizationPercentage: 70
   pdb:
     minAvailable: 2
+  # Which Argo Rollouts strategy is active: "canary" or "blueGreen".
+  # Only one can be active at a time (see api-deployment.yaml's comment for
+  # why) -- flip this value and redeploy to switch between them for real.
+  strategy: canary
+  canary:
+    steps:
+      - setWeight: 20
+      - pause: { duration: 30s }
+      - setWeight: 50
+      - pause: { duration: 30s }
+      - setWeight: 100
+  blueGreen:
+    # false = a human must explicitly `kubectl argo rollouts promote` (or
+    # click Promote in the dashboard) before the previewService's pods
+    # become the activeService's pods. true = auto-promote after
+    # autoPromotionSeconds (would need adding below) with no human step.
+    autoPromotionEnabled: false
 
 web:
   image:

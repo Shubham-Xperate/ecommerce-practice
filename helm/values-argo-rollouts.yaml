@@ -1,0 +1,11 @@
+# Same reason as every other Helm install today: Azure Policy on this
+# cluster rejects any container with no resource requests.
+controller:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+dashboard:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }

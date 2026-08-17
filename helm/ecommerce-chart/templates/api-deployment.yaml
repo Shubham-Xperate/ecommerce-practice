@@ -1,8 +1,19 @@
-# Templated equivalent of k8s/base/api-deployment.yaml -- see that file's
-# comments for the full explanation of readiness vs liveness, why
-# requests/limits matter for HPA, and the runAsNonRoot/runAsUser reasoning.
-apiVersion: apps/v1
-kind: Deployment
+# Was a plain apps/v1 Deployment; converted to an Argo Rollouts `Rollout`
+# (installed via helm/values-argo-rollouts.yaml) specifically to get real
+# traffic-shaping deploy strategies -- a plain Deployment can only ever do
+# an eventual, all-or-nothing rolling replacement, never "keep most traffic
+# on the old version while gradually proving out the new one." See
+# ecommerce-web's Deployment (web-deployment.yaml) for the plain Rolling
+# Update comparison point, kept deliberately unconverted for contrast.
+#
+# .Values.api.strategy selects WHICH of the two Argo Rollouts strategies is
+# active - "canary" (gradual weighted traffic shift) or "blueGreen" (full
+# instant cutover with a separate preview Service to verify first). Only
+# ONE strategy can be active on a given Rollout at a time - this is a hard
+# Kubernetes/Argo Rollouts constraint, not a simplification - but both are
+# fully written out below and real/testable by flipping this one value.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: ecommerce-api
   namespace: {{ .Values.namespace }}
@@ -11,12 +22,29 @@ metadata:
 spec:
   {{- if not .Values.api.hpa.enabled }}
   # replicas is deliberately OMITTED when the HPA is enabled: the HPA
-  # controller becomes the field-owner of .spec.replicas via the Deployment's
-  # /scale subresource, and a Helm upgrade that also tries to set this field
+  # controller becomes the field-owner of .spec.replicas via the Rollout's
+  # /scale subresource (Rollout supports being an HPA target exactly like
+  # Deployment does), and a Helm upgrade that also tries to set this field
   # every time conflicts with that ownership under Server-Side Apply
   # (confirmed live: "conflict with kube-controller-manager ... .spec.replicas").
   replicas: {{ .Values.api.replicaCount }}
   {{- end }}
+  # NOTE: these steps/settings only ever take effect on an UPDATE to an
+  # already-existing Rollout (a new image, a changed env var, etc). The
+  # very first time this object is created, Argo Rollouts just stands up
+  # the full replica count directly as the "stable" baseline - there is no
+  # prior version yet to shift traffic away from or preview against.
+  strategy:
+    {{- if eq .Values.api.strategy "blueGreen" }}
+    blueGreen:
+      activeService: ecommerce-api
+      previewService: ecommerce-api-preview
+      autoPromotionEnabled: {{ .Values.api.blueGreen.autoPromotionEnabled }}
+    {{- else }}
+    canary:
+      steps:
+        {{- toYaml .Values.api.canary.steps | nindent 8 }}
+    {{- end }}
   # Dedicated selector label (NOT app.kubernetes.io/name, which
   # "ecommerce-chart.labels" already sets to the CHART name for Helm's own
   # tracking purposes) -- keeping pod-selection on its own key avoids the
