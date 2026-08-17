@@ -1,0 +1,380 @@
+# =============================================================================
+# Azure Pipelines CI/CD for ecommerce-practice
+# =============================================================================
+#
+# WHAT THIS PIPELINE DOES, AND WHERE ITS RESPONSIBILITY ENDS
+# -----------------------------------------------------------------------------
+# This is the CI half of a GitOps CI/CD split (mirrors what we set up live
+# with ArgoCD earlier). Its job stops at:
+#   1. building (and, where a real test project exists, testing) the .NET
+#      API and Angular web app
+#   2. building both Docker images
+#   3. scanning them with Trivy BEFORE they ever reach the registry
+#   4. pushing to Azure Container Registry (ACR)
+#   5. bumping the image tag in helm/ecommerce-chart/values.yaml and
+#      committing that change
+#
+# It NEVER runs `kubectl apply` or `helm upgrade/install` against the
+# cluster. That is deliberate: ArgoCD (already running inside AKS, see
+# argocd/application.yaml) is the only thing with write access to the
+# cluster, and it works by continuously PULLING desired state from Git,
+# not by this pipeline PUSHING changes into the cluster. This file's last
+# responsibility is "make a commit" - everything after that commit lands
+# is ArgoCD's job, confirmed live earlier today (a plain `git push` was
+# picked up and deployed automatically, with zero kubectl/helm command run
+# by a human at that point).
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - feature/ku8 # the branch our live ArgoCD Application currently tracks
+  paths:
+    exclude:
+      - "**/*.md"
+      - helm/ecommerce-chart/values.yaml # commits made BY this pipeline (tag bumps) must not retrigger it - see [skip ci] note below
+
+pr:
+  # PR validation: build + test ONLY, never push images or touch the
+  # GitOps values file. Gives fast feedback on PRs without granting a PR
+  # branch (which could be anyone's) any ability to push to ACR.
+  branches:
+    include:
+      - feature/ku8
+  paths:
+    exclude:
+      - "**/*.md"
+      - helm/ecommerce-chart/values.yaml
+
+variables:
+  # -- Container registry --
+  acrName: "acrecommercepoc"
+  acrLoginServer: "$(acrName).azurecr.io"
+  apiImageName: "ecommerce-api"
+  webImageName: "ecommerce-web"
+
+  # -- Service connection (configured in Azure DevOps UI, never in YAML) --
+  # An Azure DevOps "service connection" of type "Docker Registry" (Azure
+  # Container Registry flavor) stores a Service Principal / Managed
+  # Identity that Azure DevOps uses to authenticate `docker push` to ACR.
+  # No ACR credential of any kind is ever written into this file - the
+  # Docker@2 task exchanges the service connection for a short-lived token
+  # at run time, same "no stored secret" principle we used for AKS->ACR
+  # pulls via the kubelet identity earlier today.
+  acrServiceConnection: "acr-service-connection" # <-- create under Project Settings > Service connections
+
+  # -- Image tagging strategy --
+  # $(Build.BuildId) is Azure Pipelines' own unique, monotonically
+  # increasing, IMMUTABLE integer per run - never ":latest". This isn't
+  # just a style preference: we proved live today that Azure Policy on
+  # this exact AKS cluster HARD-REJECTS any pod using the "latest" tag
+  # (the azurepolicy-k8sazurev2containernolatestima Gatekeeper constraint
+  # that blocked our own web-deployment earlier). A floating tag would
+  # also never actually trigger ArgoCD - it only re-syncs when a file's
+  # CONTENT changes, and pushing the same string twice produces no diff.
+  imageTag: "$(Build.BuildId)"
+
+  buildConfiguration: "Release"
+  dotnetSolution: "backend/ECommerce.sln"
+
+stages:
+  # ===========================================================================
+  # STAGE 1: Build_And_Test
+  # ===========================================================================
+  - stage: Build_And_Test
+    displayName: "Build & Test (API + Web)"
+    jobs:
+      - job: Build_Api
+        displayName: "Build .NET API"
+        pool:
+          vmImage: "ubuntu-latest" # Microsoft-hosted agent - no self-hosted infra to maintain for this POC
+        steps:
+          - task: UseDotNet@2
+            displayName: "Install .NET 8 SDK"
+            inputs:
+              packageType: "sdk"
+              version: "8.x"
+
+          - script: dotnet restore "$(dotnetSolution)"
+            displayName: "dotnet restore"
+
+          - script: dotnet build "$(dotnetSolution)" --configuration $(buildConfiguration) --no-restore
+            displayName: "dotnet build"
+
+          # NO `dotnet test` step here - confirmed no test project exists
+          # in this repo yet (backend/ has zero .Tests projects). This is
+          # a real, honest gap, not an oversight: adding a real test
+          # project is a separate task, not something to fake a step for.
+          - script: echo "No .NET test project exists yet - skipping dotnet test. Add one under backend/tests/ and a real test step here."
+            displayName: "(placeholder) no backend tests yet"
+
+      - job: Build_Test_Web
+        displayName: "Build & Test Angular Web"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: NodeTool@0
+            displayName: "Install Node.js"
+            inputs:
+              versionSpec: "20.x"
+
+          - script: npm ci
+            displayName: "npm ci"
+            workingDirectory: frontend
+
+          # Same production build the Docker image bakes in later - fails
+          # fast here, in CI, before we ever get to the Docker stage.
+          - script: npx ng build --configuration production
+            displayName: "ng build --configuration production"
+            workingDirectory: frontend
+
+          - script: |
+              npx ng test --watch=false --browsers=ChromeHeadless
+            displayName: "ng test (ChromeHeadless, single run)"
+            workingDirectory: frontend
+            env:
+              CHROME_BIN: /usr/bin/google-chrome # ubuntu-latest Microsoft-hosted images ship Chrome preinstalled
+
+  # ===========================================================================
+  # STAGE 2: Build_Images
+  # Only for real branch builds, never PRs (a PR from anyone shouldn't be
+  # able to push images to ACR). Deliberately BUILD only here, not push -
+  # see STAGE 3 for why the scan has to happen in between.
+  # ===========================================================================
+  - stage: Build_Images
+    displayName: "Build Docker Images"
+    dependsOn: Build_And_Test
+    condition: >
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/feature/ku8'),
+        ne(variables['Build.Reason'], 'PullRequest')
+      )
+    jobs:
+      - job: Build_Api_Image
+        displayName: "docker build ecommerce-api"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: Docker@2
+            displayName: "Build ecommerce-api image (no push yet)"
+            inputs:
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(apiImageName)"
+              command: "build"
+              Dockerfile: "backend/dockerfile"
+              buildContext: "backend"
+              tags: |
+                $(imageTag)
+
+          # Docker@2's build output stays in this job's own agent/VM -
+          # nothing crosses job boundaries by default. We save it as a
+          # pipeline artifact so STAGE 3's Trivy job (a SEPARATE agent) can
+          # load the exact same image without rebuilding it from scratch.
+          - script: |
+              set -euo pipefail
+              docker save $(acrLoginServer)/$(apiImageName):$(imageTag) -o $(Build.ArtifactStagingDirectory)/api-image.tar
+            displayName: "docker save -> pipeline artifact"
+
+          - publish: $(Build.ArtifactStagingDirectory)/api-image.tar
+            artifact: api-image
+
+      - job: Build_Web_Image
+        displayName: "docker build ecommerce-web"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: Docker@2
+            displayName: "Build ecommerce-web image (no push yet)"
+            inputs:
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(webImageName)"
+              command: "build"
+              Dockerfile: "frontend/dockerfile"
+              buildContext: "frontend"
+              tags: |
+                $(imageTag)
+
+          - script: |
+              set -euo pipefail
+              docker save $(acrLoginServer)/$(webImageName):$(imageTag) -o $(Build.ArtifactStagingDirectory)/web-image.tar
+            displayName: "docker save -> pipeline artifact"
+
+          - publish: $(Build.ArtifactStagingDirectory)/web-image.tar
+            artifact: web-image
+
+  # ===========================================================================
+  # STAGE 3: Trivy_Scan
+  # Scans the images BEFORE they ever reach ACR - a vulnerable image should
+  # never be pushed at all, not be pushed-then-flagged after the fact.
+  # This is the literal "Docker build -> Trivy Scan -> ACR push" order.
+  # ===========================================================================
+  - stage: Trivy_Scan
+    displayName: "Trivy Vulnerability Scan"
+    dependsOn: Build_Images
+    condition: succeeded()
+    jobs:
+      - job: Scan_Api_Image
+        displayName: "Scan ecommerce-api"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - download: current
+            artifact: api-image
+
+          - script: |
+              set -euo pipefail
+              docker load -i "$(Pipeline.Workspace)/api-image/api-image.tar"
+            displayName: "docker load"
+
+          - script: |
+              set -euo pipefail
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            displayName: "Install Trivy"
+
+          - script: |
+              set -euo pipefail
+              # --exit-code 1 makes Trivy itself fail the pipeline step if
+              # anything HIGH/CRITICAL is found - a scan that only prints a
+              # report but can't block a bad image isn't actually a gate.
+              trivy image \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --ignore-unfixed \
+                $(acrLoginServer)/$(apiImageName):$(imageTag)
+            displayName: "trivy image scan (fails on HIGH/CRITICAL)"
+
+      - job: Scan_Web_Image
+        displayName: "Scan ecommerce-web"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - download: current
+            artifact: web-image
+
+          - script: |
+              set -euo pipefail
+              docker load -i "$(Pipeline.Workspace)/web-image/web-image.tar"
+            displayName: "docker load"
+
+          - script: |
+              set -euo pipefail
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            displayName: "Install Trivy"
+
+          - script: |
+              set -euo pipefail
+              trivy image \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --ignore-unfixed \
+                $(acrLoginServer)/$(webImageName):$(imageTag)
+            displayName: "trivy image scan (fails on HIGH/CRITICAL)"
+
+  # ===========================================================================
+  # STAGE 4: Push_Images
+  # Only reached if BOTH scans passed. This is the actual `docker push` -
+  # deliberately its own separate stage/job so "build" and "scan" can never
+  # accidentally be skipped by a change to this stage alone.
+  # ===========================================================================
+  - stage: Push_Images
+    displayName: "Push Images to ACR"
+    dependsOn: Trivy_Scan
+    condition: succeeded()
+    jobs:
+      - job: Push_Api_Image
+        displayName: "docker push ecommerce-api"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - download: current
+            artifact: api-image
+          - script: docker load -i "$(Pipeline.Workspace)/api-image/api-image.tar"
+            displayName: "docker load"
+          - task: Docker@2
+            displayName: "docker push ecommerce-api"
+            inputs:
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(apiImageName)"
+              command: "push"
+              tags: |
+                $(imageTag)
+
+      - job: Push_Web_Image
+        displayName: "docker push ecommerce-web"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - download: current
+            artifact: web-image
+          - script: docker load -i "$(Pipeline.Workspace)/web-image/web-image.tar"
+            displayName: "docker load"
+          - task: Docker@2
+            displayName: "docker push ecommerce-web"
+            inputs:
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(webImageName)"
+              command: "push"
+              tags: |
+                $(imageTag)
+
+  # ===========================================================================
+  # STAGE 5: Update_GitOps
+  # The moment ArgoCD picks up a new deploy - confirmed live today, a
+  # commit here is all it takes. This stage does NOT touch the cluster;
+  # it only edits helm/ecommerce-chart/values.yaml and commits.
+  # ===========================================================================
+  - stage: Update_GitOps
+    displayName: "Update Helm values.yaml (triggers ArgoCD)"
+    dependsOn: Push_Images
+    condition: succeeded()
+    jobs:
+      - job: Bump_Image_Tags
+        displayName: "Bump image tags & commit"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+            persistCredentials: true # lets the script below `git push` using the pipeline's own OAuth token
+            fetchDepth: 0 # need full history, not a shallow clone, to push a normal commit cleanly
+
+          - script: |
+              set -euo pipefail
+              sudo snap install yq
+            displayName: "Install yq (YAML editor)"
+
+          - script: |
+              set -euo pipefail
+              VALUES_FILE="helm/ecommerce-chart/values.yaml"
+
+              yq -i ".api.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+              yq -i ".web.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+
+              echo "----- updated $VALUES_FILE -----"
+              grep -A1 "tag:" "$VALUES_FILE"
+            displayName: "Bump api/web image.tag in helm/ecommerce-chart/values.yaml"
+
+          - script: |
+              set -euo pipefail
+              git config user.email "devops-bot@ecommerce-practice.local"
+              git config user.name "ecommerce-devops-bot"
+
+              git add helm/ecommerce-chart/values.yaml
+
+              # [skip ci] prevents THIS commit from retriggering the
+              # pipeline's own trigger, which would otherwise loop forever
+              # (bot commits a tag bump -> triggers a new build -> pushes
+              # new images -> bumps the tag again -> ...). The
+              # trigger.paths.exclude for this same file above is a second,
+              # belt-and-suspenders safeguard against the same loop.
+              git commit -m "ci: bump image tags to $(imageTag) [skip ci]" --allow-empty
+
+              git push origin HEAD:feature/ku8
+            displayName: "Commit & push tag bump (bot identity, [skip ci])"
+
+          - script: |
+              echo "helm/ecommerce-chart/values.yaml updated."
+              echo "ArgoCD's Application (argocd/application.yaml) has automated sync enabled,"
+              echo "so it will pick this commit up and deploy it with no further human action -"
+              echo "confirmed live earlier today with the replica-count and Prometheus-instrumentation changes."
+            displayName: "Reminder: ArgoCD auto-syncs from here"

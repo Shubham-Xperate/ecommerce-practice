@@ -71,3 +71,10 @@ kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 909
 
 az acr login -n acrecommercepoc 2>&1
 docker push acrecommercepoc.azurecr.io/ecommerce-api:1.1.0
+
+kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode
+
+
+kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
+
+az extension add --name azure-devops --yes
