@@ -80,3 +80,14 @@ kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
 az extension add --name azure-devops --yes
 
 helm install argo-rollouts argo/argo-rollouts -n argo-rollouts --create-namespace -f helm/values-argo-rollouts.yaml 2>&1 | tail -20
+
+kubectl -n argocd get deploy -l app.kubernetes.io/name=argocd-server
+
+kubectl -n argocd rollout restart deployment argocd-server
+
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("WGZMaXJ1NDNiNUNBV0p0NQ=="))
+
+
+az acr import --name acrecommercepoc --source acrecommercepoc.azurecr.io/ecommerce-api:1.1.0 --image ecommerce-api:1.3.0
+az acr repository show-tags --name acrecommercepoc --repository ecommerce-api --output table
