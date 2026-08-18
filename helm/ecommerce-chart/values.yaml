@@ -35,7 +35,7 @@ config:
 api:
   image:
     repository: ecommerce-api
-    tag: "1.3.0"
+    tag: "1.4.0"
   replicaCount: 3
   resources:
     requests:
@@ -54,7 +54,7 @@ api:
   # Which Argo Rollouts strategy is active: "canary" or "blueGreen".
   # Only one can be active at a time (see api-deployment.yaml's comment for
   # why) -- flip this value and redeploy to switch between them for real.
-  strategy: canary
+  strategy: blueGreen
   canary:
     steps:
       - setWeight: 20
