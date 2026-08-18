@@ -21,7 +21,15 @@ spec:
   selector:
     ecommerce.io/component: api
   ports:
-    - port: 8080
+    # Deliberately a DIFFERENT port number than ecommerce-api's 8080 (same
+    # targetPort though, so it still reaches the identical pods/container
+    # port). AKS's "deployment safeguards" uniqueServiceSelectors policy
+    # rejects two Services with the same selector AND the same exposed
+    # port before Argo Rollouts ever gets a chance to patch in its
+    # distinguishing rollouts-pod-template-hash selector label -- this
+    # sidesteps that by never having an identical (selector, port) pair
+    # in the first place.
+    - port: 8081
       targetPort: 8080
       name: http
 {{- end }}
