@@ -1,0 +1,8 @@
+# Copy to backend.hcl (gitignored) once a real Storage Account exists.
+# Same storage account/container as dev is fine -- the `key` below is
+# what keeps this environment's state separate from dev's.
+
+resource_group_name  = "rg-tfstate"
+storage_account_name = ""
+container_name       = "tfstate"
+key                  = "prod/ecommerce.tfstate"

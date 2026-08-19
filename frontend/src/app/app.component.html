@@ -1,0 +1,15 @@
+<nav class="navbar">
+  <span class="brand">Ecommerce Web</span>
+  <div class="links">
+    <a routerLink="/">Catalog</a>
+    <a routerLink="/cart">Cart ({{ cartCount }})</a>
+    <a *ngIf="auth.isLoggedIn()" routerLink="/orders">Orders</a>
+    <a *ngIf="!auth.isLoggedIn()" routerLink="/login">Login</a>
+    <a *ngIf="!auth.isLoggedIn()" routerLink="/register">Register</a>
+    <button *ngIf="auth.isLoggedIn()" (click)="logout()">Logout</button>
+  </div>
+</nav>
+
+<main class="container">
+  <router-outlet></router-outlet>
+</main>

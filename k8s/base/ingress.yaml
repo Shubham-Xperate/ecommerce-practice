@@ -1,0 +1,65 @@
+# =============================================================================
+# ingress.yaml
+# =============================================================================
+#
+# PREREQUISITE: this Ingress resource does nothing by itself -- an Ingress
+# object is just a set of routing RULES; something must actually implement
+# them. Locally, install the NGINX Ingress Controller first, e.g. via its
+# Helm chart:
+#
+#   helm upgrade --install ingress-nginx ingress-nginx \
+#     --repo https://kubernetes.github.io/ingress-nginx \
+#     --namespace ingress-nginx --create-namespace
+#
+# (on kind you also need the controller's kind-specific manifest/port
+# mappings; on minikube run `minikube addons enable ingress` instead, which
+# installs the same controller for you).
+#
+# LOCAL DNS: this Ingress routes the host `ecommerce.local`. Your machine
+# has no idea that name means anything, so add a line to your hosts file
+# pointing it at the Ingress controller's IP (127.0.0.1 for kind's usual
+# port-forwarded setup, or `minikube ip` for minikube):
+#   Windows: C:\Windows\System32\drivers\etc\hosts
+#   Linux/Mac: /etc/hosts
+#     127.0.0.1  ecommerce.local
+#
+# Everything under /api/ is NOT routed here on purpose: the request flow is
+# browser -> Ingress -> ecommerce-web (nginx) -> nginx's own internal
+# proxy_pass to ecommerce-api:8080. The Ingress only ever needs to know about
+# one backend, the frontend, which keeps this file simple and keeps API
+# routing logic in exactly one place (the frontend's nginx.conf).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+  labels:
+    app: ecommerce
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+  # Example of an ingress-nginx-specific tweak: rewrite isn't actually
+  # needed here since we route "/" to "/", but this annotation is left as
+  # a commented teaching note for when you add more path-based rules later.
+  # annotations:
+  #   nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  # ingressClassName tells Kubernetes WHICH installed ingress controller
+  # should pick up this object, in case a cluster has more than one
+  # (common in real environments: e.g. an internal + external controller).
+  # "nginx" matches the class the ingress-nginx chart registers by default.
+  ingressClassName: nginx
+  rules:
+    - host: ecommerce.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ecommerce-web
+                port:
+                  number: 80
+  # NOTE: no `tls:` block here -- this is HTTP-only, intentional for local
+  # practice. On AKS in production you'd add a tls section here referencing
+  # a Secret populated by cert-manager (Let's Encrypt) or an Azure-managed
+  # certificate, plus an annotation telling cert-manager which ClusterIssuer
+  # to use.

@@ -1,0 +1,17 @@
+\.env
+bin/
+obj/
+node_modules/
+dist/
+*.user
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
+backend.hcl
+!backend.hcl.example
+*.tfplan
+tfplan.out
+.vs/
+.vscode/

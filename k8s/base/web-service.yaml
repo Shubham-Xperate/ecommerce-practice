@@ -1,0 +1,22 @@
+# web-service.yaml
+#
+# This name (`ecommerce-web`) is referenced by ingress.yaml as the backend
+# for the `/` path. Unlike the API Service, this one IS meant to be reached
+# from outside the cluster -- but only indirectly, through the Ingress
+# controller, not by exposing this Service itself as a NodePort/LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-web
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-web
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ecommerce-web
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http

@@ -1,0 +1,15 @@
+# Same PodDisruptionBudget reasoning as k8s/overlays/prod/pdb.yaml -- caps
+# how many API pods a voluntary disruption (node drain, AKS upgrade,
+# cluster-autoscaler scale-down) can take out at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ecommerce-api-pdb
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      ecommerce.io/component: api

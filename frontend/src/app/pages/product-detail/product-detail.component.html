@@ -1,0 +1,22 @@
+<p *ngIf="error" class="error">{{ error }}</p>
+<p *ngIf="loading" class="muted">Loading product...</p>
+
+<div class="card" *ngIf="product && !loading">
+  <h1>{{ product.name }}</h1>
+  <p class="muted">{{ product.categoryName }}</p>
+  <p>{{ product.description }}</p>
+  <p><strong>{{ product.price | number: '1.2-2' }}</strong></p>
+  <p class="muted">Stock: {{ product.stock }}</p>
+
+  <div class="form-field">
+    <label for="quantity">Quantity</label>
+    <input id="quantity" type="number" min="1" [max]="product.stock" [(ngModel)]="quantity" />
+  </div>
+
+  <button (click)="addToCart()" [disabled]="product.stock <= 0">Add to cart</button>
+  <button class="secondary" (click)="goToCart()">Go to cart</button>
+
+  <p *ngIf="addedMessage" class="success">{{ addedMessage }}</p>
+</div>
+
+<p><a routerLink="/">Back to catalog</a></p>

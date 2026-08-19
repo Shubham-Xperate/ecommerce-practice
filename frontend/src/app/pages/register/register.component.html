@@ -1,0 +1,36 @@
+<h1>Register</h1>
+
+<form [formGroup]="form" (ngSubmit)="submit()">
+  <div class="form-field">
+    <label for="email">Email</label>
+    <input id="email" type="email" formControlName="email" />
+    <span
+      class="error"
+      *ngIf="form.get('email')?.invalid && form.get('email')?.touched"
+    >
+      A valid email is required.
+    </span>
+  </div>
+
+  <div class="form-field">
+    <label for="password">Password</label>
+    <input id="password" type="password" formControlName="password" />
+    <span
+      class="error"
+      *ngIf="form.get('password')?.invalid && form.get('password')?.touched"
+    >
+      Password must be at least 8 characters.
+    </span>
+  </div>
+
+  <p *ngIf="error" class="error">{{ error }}</p>
+  <p *ngIf="success" class="success">Registration successful! Redirecting to login...</p>
+
+  <button type="submit" [disabled]="submitting">
+    {{ submitting ? 'Registering...' : 'Register' }}
+  </button>
+</form>
+
+<p class="muted">
+  Already have an account? <a routerLink="/login">Login</a>
+</p>

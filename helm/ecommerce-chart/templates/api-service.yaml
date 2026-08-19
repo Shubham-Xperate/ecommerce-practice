@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    ecommerce.io/component: api
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    ecommerce.io/component: api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

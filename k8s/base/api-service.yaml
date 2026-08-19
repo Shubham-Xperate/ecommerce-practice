@@ -1,0 +1,32 @@
+# api-service.yaml
+#
+# *** THE NAME OF THIS SERVICE IS LOAD-BEARING -- DO NOT RENAME ***
+# The frontend's nginx.conf (baked into the ecommerce-web image) hardcodes
+#   proxy_pass http://ecommerce-api:8080;
+# for the /api/ location block. That's plain DNS: Kubernetes gives every
+# Service a DNS record of <service-name>.<namespace>.svc.cluster.local, and
+# `ecommerce-api` alone resolves correctly for any pod inside the same
+# `ecommerce` namespace (DNS search suffixes handle the short form). If this
+# Service's name OR port ever changes, the frontend image must be rebuilt
+# with a matching nginx.conf, or the API becomes unreachable from the UI.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-api
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  # ClusterIP (the default type) = only reachable from inside the cluster.
+  # Correct here: nothing outside the cluster should ever talk to the API
+  # directly -- all external traffic comes in through the Ingress -> nginx
+  # frontend -> (this Service) -> API pods path, so the API is never
+  # directly internet-facing.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ecommerce-api
+  ports:
+    - port: 8080        # port other things inside the cluster use to reach this Service
+      targetPort: 8080  # port the container actually listens on (must match containerPort in api-deployment.yaml)
+      name: http

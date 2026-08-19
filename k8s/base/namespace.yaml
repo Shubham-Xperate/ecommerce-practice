@@ -1,0 +1,22 @@
+# namespace.yaml
+#
+# WHY a dedicated Namespace?
+# - Namespaces give us a logical boundary for RBAC, ResourceQuotas, NetworkPolicies,
+#   and simply for "kubectl get pods -n ecommerce" sanity instead of dumping everything
+#   into `default`.
+# - Every other manifest in this lab targets `namespace: ecommerce` explicitly (raw YAML
+#   has no concept of "current context namespace" the way Helm's .Release.Namespace does),
+#   so this must be applied FIRST (Kustomize resource ordering handles this for us; if you
+#   were applying files by hand with plain kubectl you'd need to `kubectl apply -f namespace.yaml`
+#   before anything else).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    # Standard Kubernetes recommended labels (see kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/)
+    # These make the namespace discoverable/filterable and are good practice even though
+    # they're not strictly required for anything to function.
+    app.kubernetes.io/name: ecommerce
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+    environment: base

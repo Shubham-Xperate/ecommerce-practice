@@ -1,0 +1,25 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+WORKDIR /src
+
+COPY src/ECommerce.Api/ECommerce.Api.csproj /src/ECommerce.Api/
+RUN dotnet restore /src/ECommerce.Api/ECommerce.Api.csproj
+
+COPY src/ECommerce.Api /src/ECommerce.Api
+RUN dotnet publish ECommerce.Api/ECommerce.Api.csproj -c release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+
+WORKDIR /app
+
+RUN groupadd -r appgroup --gid=999 && useradd -r -u 999 -g appgroup appuser
+
+COPY --from=build /app/publish .
+
+EXPOSE 8080
+ENV ASPNETCORE_URLS=http://+:8080
+
+RUN chown -R appuser:appgroup /app
+USER appuser
+
+ENTRYPOINT ["dotnet", "ECommerce.Api.dll"]

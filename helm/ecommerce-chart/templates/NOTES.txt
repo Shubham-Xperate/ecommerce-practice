@@ -1,0 +1,13 @@
+1. Check rollout status:
+   kubectl get pods -n {{ .Values.namespace }} -w
+
+2. Get the application's public address:
+{{- if .Values.ingress.enabled }}
+   kubectl get ingress ecommerce-ingress -n {{ .Values.namespace }}
+   (uses AKS's managed "{{ .Values.ingress.className }}" ingress controller)
+{{- else }}
+   kubectl get svc ecommerce-web -n {{ .Values.namespace }}
+{{- end }}
+
+3. Run the built-in smoke test:
+   helm test {{ .Release.Name }} -n {{ .Values.namespace }}

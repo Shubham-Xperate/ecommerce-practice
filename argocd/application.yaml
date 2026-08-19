@@ -1,0 +1,61 @@
+# ArgoCD Application: ecommerce
+# ------------------------------
+# The actual "deploy this" object -- watches helm/ecommerce-chart in this
+# repo and keeps the "ecommerce" namespace on this cluster matching it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ecommerce
+  namespace: argocd
+  # Prevents an accidental `argocd app delete --cascade` from also deleting
+  # this Application's own tracked resources without an explicit confirm.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+
+  source:
+    repoURL: "https://github.com/Shubham-Xperate/ecommerce-practice.git"
+    targetRevision: feature/ku8
+    path: helm/ecommerce-chart
+    # ArgoCD auto-detects this path is a Helm chart (Chart.yaml present) and
+    # renders it the same way `helm template` does, using the chart's own
+    # values.yaml as the baseline -- no separate values override needed here
+    # since values.yaml already represents this POC's real configuration.
+
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: ecommerce
+
+  # AKS's own "deployment safeguards" admission webhook mutates Deployments
+  # on EVERY apply, not just at creation -- confirmed live via
+  # argocd-application-controller logs: it re-injects affinity/
+  # topologySpreadConstraints AND re-adjusts container resource
+  # requests/limits (bumped web's cpu request from the chart's 50m up to
+  # 100m) immediately after every single sync. Without ignoring all three,
+  # ArgoCD's selfHeal loop fights the webhook forever -- confirmed 7 retry
+  # attempts (SelfHealAttemptsCount:7) before this fix, each one immediately
+  # undone by the same webhook a moment later.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/template/spec/affinity
+        - /spec/template/spec/topologySpreadConstraints
+        - /spec/template/spec/containers/0/resources
+
+  syncPolicy:
+    automated:
+      # If a commit removes something from the chart, delete it from the
+      # cluster too (rather than leaving orphaned resources behind).
+      prune: true
+      # If someone runs `kubectl edit`/`kubectl delete` directly against a
+      # resource this Application manages, revert it back to match Git.
+      # NOTE: this is the "learning" setting -- a real prod Application
+      # would omit `automated` entirely, requiring an explicit
+      # `argocd app sync` after a change-management approval (see this
+      # repo's earlier discussion of the reference project's
+      # ecommerce-prod-app.yaml pattern).
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

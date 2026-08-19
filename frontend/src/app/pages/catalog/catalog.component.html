@@ -1,0 +1,42 @@
+<h1>Electrical Catalog</h1>
+
+<div class="form-field">
+  <label for="category">Category</label>
+  <select id="category" [(ngModel)]="selectedCategoryId" (ngModelChange)="onCategoryChange()">
+    <option [ngValue]="null">All categories</option>
+    <option *ngFor="let c of categories" [ngValue]="c.id">{{ c.name }}</option>
+  </select>
+</div>
+
+<p *ngIf="error" class="error">{{ error }}</p>
+<p *ngIf="loading" class="muted">Loading products...</p>
+
+<div class="grid" *ngIf="!loading">
+  <div class="card" *ngFor="let p of products">
+    <h3>{{ p.name }}</h3>
+    <p class="muted">{{ p.categoryName }}</p>
+    <p>{{ p.price | number: '1.2-2' }}</p>
+    <p class="muted">Stock: {{ p.stock }}</p>
+    <a class="btn" [routerLink]="['/products', p.id]">View details</a>
+  </div>
+  <p *ngIf="products.length === 0" class="muted">No products found.</p>
+</div>
+
+<div class="pagination" *ngIf="!loading">
+  <button (click)="goToPage(page - 1)" [disabled]="page <= 1">Previous</button>
+  <span>Page {{ page }} of {{ totalPages }}</span>
+  <button (click)="goToPage(page + 1)" [disabled]="page >= totalPages">Next</button>
+</div>
+
+
+kubectl get nodes
+echo "---PODS---"
+kubectl get pods -n ecommerce
+echo "---ARGOCD---"
+kubectl get pods -n argocd | head -5
+kubectl get applications -n argocd
+
+kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+
+kubectl get svc argocd-server -n argocd -o yaml | grep -A 10 "ports:"

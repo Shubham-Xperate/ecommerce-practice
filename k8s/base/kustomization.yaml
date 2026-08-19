@@ -1,0 +1,38 @@
+# kustomization.yaml (base)
+#
+# This is the entry point Kustomize reads to know what to build. `base/` is
+# the common, environment-agnostic definition of "the ecommerce app" --
+# overlays (../overlays/dev, ../overlays/prod) reference THIS directory and
+# layer environment-specific patches on top rather than duplicating these
+# files. Resource ORDER here roughly follows dependency order (namespace
+# first, config/secrets before workloads that consume them) purely for
+# human readability -- Kustomize/kubectl apply doesn't strictly require this
+# ordering since apply-time it just POSTs objects and lets Kubernetes retry
+# transient "does not exist yet" errors, but reading top-to-bottom like this
+# mirrors how you'd bootstrap it by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Every raw manifest that makes up "the app". Overlays never need to repeat
+# this list -- they just say `resources: [../../base]` and patch from there.
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - secretproviderclass.yaml
+  - configmap.yaml
+  - sql-statefulset.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+# Common labels stamped onto every resource Kustomize builds from this base,
+# in addition to whatever labels each manifest already declares. Handy for
+# `kubectl get all -l app.kubernetes.io/part-of=ecommerce-devops-lab` style
+# queries that span every object regardless of kind.
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

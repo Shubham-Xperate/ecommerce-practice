@@ -1,0 +1,45 @@
+# ArgoCD AppProject: ecommerce
+# -----------------------------
+# An AppProject is ArgoCD's RBAC/scoping boundary. Without one, every
+# Application lands in the built-in "default" project, which allows ANY
+# source repo, ANY destination cluster/namespace, and ANY Kubernetes
+# resource kind -- too permissive beyond a quick demo. This scopes the
+# ecommerce project down to exactly the repo and namespace it actually needs.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ecommerce
+  namespace: argocd
+spec:
+  description: Ecommerce app project -- scopes source repo, destination namespace, and resource kinds.
+
+  # Only Applications whose source repoURL matches an entry here may be
+  # associated with this project.
+  sourceRepos:
+    - "https://github.com/Shubham-Xperate/ecommerce-practice.git"
+
+  # Only this (destination cluster, namespace) pair may be targeted.
+  # "https://kubernetes.default.svc" is the special in-cluster API server
+  # address -- ArgoCD is running inside the same AKS cluster it manages.
+  destinations:
+    - server: "https://kubernetes.default.svc"
+      namespace: ecommerce
+
+  # Only "Namespace" is whitelisted here -- our chart's own
+  # templates/namespace.yaml creates the "ecommerce" Namespace object
+  # directly (a cluster-scoped kind), so ArgoCD needs explicit permission
+  # to manage it. Deliberately NOT a wildcard: every other cluster-scoped
+  # kind (ClusterRole, CustomResourceDefinition, etc.) remains blocked,
+  # keeping the blast radius of a misconfigured Application to just this
+  # one, expected, reviewed exception.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # "*"/"*" allows all groups/kinds at the namespace level -- reasonable for
+  # this learning POC; a real production project would lock this down to
+  # explicit kinds (Deployment, Service, ConfigMap, Secret, Ingress, HPA,
+  # PDB, StatefulSet, ServiceAccount, SecretProviderClass).
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

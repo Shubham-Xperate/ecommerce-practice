@@ -1,0 +1,112 @@
+# Default values for ecommerce-chart. These represent the PROD configuration
+# for this POC (matching what k8s/base + k8s/overlays/prod previously
+# produced together via Kustomize). A real multi-environment chart would
+# ship a separate values-dev.yaml overriding just the fields that differ
+# (replica counts, resource ceilings) and be layered in via
+# `helm install -f values.yaml -f values-dev.yaml`.
+
+namespace: ecommerce
+
+image:
+  registry: acrecommercepoc.azurecr.io
+  pullPolicy: IfNotPresent
+
+# Workload Identity wiring -- same UAMI/Key Vault/federated-credential chain
+# already set up in Azure (see k8s/base/serviceaccount.yaml history). Nothing
+# on the Azure side changes; only the Kubernetes-side objects are re-templated
+# here.
+serviceAccount:
+  name: ecommerce-workload-sa
+  workloadIdentityClientId: "8a714c28-cf31-4d5d-8609-4e2b306271ed"
+
+keyVault:
+  name: kv-ecommercepoc-xp
+  tenantId: "9854c15e-4bcb-4a09-b064-3f56028c95c7"
+  secretProviderClassName: ecommerce-kv-secrets
+
+# Non-sensitive app configuration -- becomes the ecommerce-config ConfigMap.
+config:
+  aspnetcoreEnvironment: "Production"
+  corsAllowedOrigin: "http://ecommerce.local"
+  jwtIssuer: "https://ecommerce.local"
+  jwtAudience: "https://ecommerce.local"
+  apiUrl: "/api"
+
+api:
+  image:
+    repository: ecommerce-api
+    tag: "1.5.0"
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    minAvailable: 2
+  # Which Argo Rollouts strategy is active: "canary" or "blueGreen".
+  # Only one can be active at a time (see api-deployment.yaml's comment for
+  # why) -- flip this value and redeploy to switch between them for real.
+  strategy: blueGreen
+  canary:
+    steps:
+      - setWeight: 20
+      - pause: { duration: 120s }
+      - setWeight: 50
+      - pause: { duration: 120s }
+      - setWeight: 100
+  blueGreen:
+    # false = a human must explicitly `kubectl argo rollouts promote` (or
+    # click Promote in the dashboard) before the previewService's pods
+    # become the activeService's pods. true = auto-promote after
+    # autoPromotionSeconds (would need adding below) with no human step.
+    autoPromotionEnabled: false
+
+web:
+  image:
+    repository: ecommerce-web
+    tag: "1.0.0"
+  replicaCount: 3
+  service:
+    # LoadBalancer (not ClusterIP) is what makes the dnsLabel below possible
+    # -- a free Azure-provided hostname, at the cost of a SECOND, separate
+    # public entry point that bypasses the Ingress controller entirely (see
+    # web-service.yaml's comment for the full trade-off). Set dnsLabel to ""
+    # and type back to ClusterIP to return to the single-entry-point setup.
+    type: LoadBalancer
+    dnsLabel: ecommerce-poc-xp
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# In-cluster SQL Server -- local/POC scaffolding, matching k8s/base's own
+# documented caveat: production would use managed Azure SQL via Private
+# Endpoint instead. Kept here for chart-parity with the Kustomize version.
+sql:
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+ingress:
+  enabled: true
+  # AKS's built-in managed "Web App Routing" add-on -- not a self-installed
+  # ingress-nginx. See k8s/overlays/prod/patch-ingress-class.yaml for the
+  # Kustomize-side equivalent of this same decision.
+  className: webapprouting.kubernetes.azure.com

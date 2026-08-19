@@ -1,0 +1,30 @@
+# Tells Prometheus (installed separately via the kube-prometheus-stack
+# Helm release, see helm/values-monitoring.yaml) to scrape ecommerce-api's
+# new /metrics endpoint (added via prometheus-net.AspNetCore in Program.cs).
+#
+# The "release: monitoring" label is REQUIRED, not decorative: that
+# monitoring stack's Prometheus is configured with
+# serviceMonitorSelectorNilUsesHelmValues: true, which means it only picks
+# up ServiceMonitor objects labeled to match its OWN Helm release name
+# ("monitoring") -- confirmed live during this session's troubleshooting.
+# Without this exact label, Prometheus would never see this object at all,
+# even though it exists and looks correct.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ecommerce-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    release: monitoring
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      ecommerce.io/component: api
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

@@ -1,0 +1,12 @@
+# Copy to backend.hcl (gitignored) and fill in with a real Storage
+# Account once you provision one for holding remote state. Then run:
+#   terraform init -backend-config=backend.hcl
+#
+# `key` is what makes dev and prod safely share the same storage account
+# and container without clobbering each other's state -- each
+# environment's backend.hcl just needs a different key.
+
+resource_group_name  = "rg-tfstate"
+storage_account_name = ""
+container_name       = "tfstate"
+key                  = "dev/ecommerce.tfstate"

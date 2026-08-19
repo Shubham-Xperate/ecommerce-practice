@@ -1,0 +1,24 @@
+# patch-web-service-dns.yaml -- prod-only override
+#
+# Turns the existing ecommerce-web Service into a LoadBalancer type and
+# requests a free Azure-provided DNS name, WITHOUT creating a second,
+# duplicate Service (which Azure Policy correctly rejected: "same selector
+# ... with overlapping ports"). Ingress routing is unaffected -- Ingress
+# just references this Service by name+port, which works identically
+# whether the Service's own type is ClusterIP or LoadBalancer.
+#
+# WHY this annotation succeeds where a direct `az network public-ip
+# update` on an AKS-managed IP does not: AKS's own cloud-provider component
+# (its own trusted identity, not us) performs the actual Azure write when
+# asked via this Kubernetes-native mechanism, bypassing the NRG lockdown
+# deny assignment that blocks EXTERNAL principals from directly modifying
+# AKS-managed infrastructure in the node resource group.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-web
+  namespace: ecommerce
+  annotations:
+    service.beta.kubernetes.io/azure-dns-label-name: ecommerce-poc-xp
+spec:
+  type: LoadBalancer

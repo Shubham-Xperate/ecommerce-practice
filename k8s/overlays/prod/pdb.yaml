@@ -1,0 +1,41 @@
+# =============================================================================
+# pdb.yaml -- PodDisruptionBudget for the API, PROD ONLY
+# =============================================================================
+#
+# WHY this matters: Kubernetes distinguishes INVOLUNTARY disruptions (node
+# hardware dies, kernel panic -- nothing you can budget for) from VOLUNTARY
+# ones (a cluster admin runs `kubectl drain` to patch/upgrade a node, AKS's
+# own node-image auto-upgrade drains nodes one at a time, the cluster
+# autoscaler scales down an underused node). A PDB puts a floor under
+# voluntary disruptions: the eviction API will REFUSE to evict a pod if
+# doing so would drop the number of available/healthy pods below
+# `minAvailable` (or above maxUnavailable, whichever style you use) for that
+# selector, across the whole cluster.
+#
+# Without this, an AKS node upgrade rolling through 3 nodes one at a time
+# could -- in the worst case timing -- drain a node holding 2 of your 3 API
+# replicas back-to-back before the Deployment controller finishes
+# rescheduling the first evicted pod elsewhere, momentarily leaving you with
+# 1 (or even 0) healthy API pods during a routine, expected maintenance
+# operation. `minAvailable: 2` with 3 desired replicas means the drain
+# process will evict one pod, WAIT for a replacement to become Ready
+# elsewhere, and only then proceed to the next -- turning "maybe an outage"
+# into "guaranteed no outage, just a slower drain".
+#
+# This is intentionally NOT in k8s/base: it only makes sense once you have
+# multiple replicas and a real multi-node cluster where node drains happen
+# routinely (AKS upgrades, autoscaler churn) -- on a 1-node kind/minikube
+# dev cluster there's nothing to "drain" around, so dev doesn't get one.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ecommerce-api-pdb
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce-api-pdb
+    app.kubernetes.io/part-of: ecommerce-devops-lab
+spec:
+  minAvailable: 2 # with prod's replicas: 3, this permits evicting at most 1 pod at a time
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ecommerce-api

@@ -1,0 +1,27 @@
+{{- if .Values.api.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ecommerce-api-hpa
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    # Was "apps/v1 Deployment" -- ecommerce-api is now an Argo Rollouts
+    # Rollout (see api-deployment.yaml), which supports being an HPA scale
+    # target exactly like a Deployment does, just under this different
+    # apiVersion/kind pair.
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: ecommerce-api
+  minReplicas: {{ .Values.api.hpa.minReplicas }}
+  maxReplicas: {{ .Values.api.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.api.hpa.targetCPUUtilizationPercentage }}
+{{- end }}

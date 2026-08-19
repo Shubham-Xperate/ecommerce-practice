@@ -1,0 +1,27 @@
+# Strategic-merge patch: only the fields listed here are changed on top of
+# base/api-deployment.yaml; probes, env, image name, etc. all pass through
+# unchanged from base.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api
+  namespace: ecommerce
+spec:
+  # A single laptop core/few GB of RAM doesn't need or want 2+ API replicas
+  # competing for scheduling -- 1 is enough to prove the app works end to end.
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: api
+          # Smaller footprint so kind/minikube (often capped at 2-4 vCPU /
+          # 4-8GB total for the whole cluster, running Kubernetes system
+          # pods too) doesn't struggle to schedule this alongside SQL
+          # Server, the web pod, ingress-nginx, etc.
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
