@@ -23,6 +23,12 @@
 # is ArgoCD's job, confirmed live earlier today (a plain `git push` was
 # picked up and deployed automatically, with zero kubectl/helm command run
 # by a human at that point).
+#
+# The infrastructure this application actually RUNS ON (AKS, ACR, VNet, Key
+# Vault) is a separate concern with its own pipeline: see
+# terraform-pipeline.yml. Deliberately not merged into this file - app
+# deploys and infra changes have very different change frequency, risk
+# profile, and approval requirements.
 # =============================================================================
 
 trigger:

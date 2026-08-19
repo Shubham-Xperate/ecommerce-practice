@@ -1,0 +1,326 @@
+# =============================================================================
+# Azure Pipelines CI/CD for terraform/ (infrastructure, NOT the application)
+# =============================================================================
+#
+# WHY THIS IS A SEPARATE FILE FROM azure-pipelines.yml
+# -----------------------------------------------------------------------------
+# azure-pipelines.yml owns the APPLICATION path: build -> scan -> push images
+# -> bump helm/ecommerce-chart/values.yaml -> ArgoCD picks it up from there.
+# It explicitly never touches the cluster or Azure infrastructure directly.
+#
+# This file owns a completely different concern: the AKS cluster, ACR, VNet,
+# and Key Vault that the application above actually RUNS ON. There is no
+# GitOps controller for Azure Resource Manager objects the way ArgoCD is one
+# for Kubernetes objects (no Crossplane/Atlantis here) - so a pipeline is
+# what actually runs `terraform apply`, not a background reconciler. This
+# also changes far less often than app code and carries a very different
+# blast radius (a bad `apply` can take the whole cluster down), so it gets
+# its own trigger paths, its own approval gates, and runs independently.
+#
+# ONE PIPELINE, TWO ENVIRONMENTS, SEQUENTIAL PROMOTION
+# -----------------------------------------------------------------------------
+# Validate -> Plan(dev) -> Apply(dev) -> Plan(prod) -> Apply(prod)
+# dev applies with a light/optional approval; prod's Apply stage is gated by
+# a MANDATORY manual approval (configured on the Azure DevOps Environment
+# itself - see the "ONE-TIME AZURE DEVOPS SETUP" note at the bottom of this
+# file, since approval rules are UI/platform config, not expressible in this
+# YAML). Nothing reaches prod without a human explicitly clicking approve,
+# and only after the exact same change has already gone through dev.
+#
+# AUTHENTICATION - NO STORED SECRET
+# -----------------------------------------------------------------------------
+# AzureCLI@2 logs in using an Azure DevOps service connection (backed by
+# either a Service Principal or, preferably, Workload Identity Federation -
+# either way, no credential is ever written into this file). Once that task
+# has run `az login`, Terraform's azurerm provider auto-detects the active
+# CLI session and uses it - this is the EXACT SAME auth mechanism this whole
+# project has relied on for every local `terraform plan`/`apply` all
+# session; CI just runs the identical command with a different login
+# source.
+#
+# BACKEND CONFIG - STILL DELIBERATELY NOT HARDCODED
+# -----------------------------------------------------------------------------
+# terraform/environments/{dev,prod}/backend.tf declares an empty
+# `backend "azurerm" {}` on purpose (see that file's own comment). The real
+# storage account details are supplied here via `-backend-config=` flags
+# sourced from pipeline variables (a Variable Group, not committed YAML) -
+# same "blank until you actually provision it" philosophy as local dev,
+# just now expressed as pipeline variables instead of a local backend.hcl.
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - feature/ku8
+  paths:
+    include:
+      - terraform/**
+
+pr:
+  branches:
+    include:
+      - feature/ku8
+  paths:
+    include:
+      - terraform/**
+
+variables:
+  # Variable Group created in Azure DevOps: Pipelines > Library > + Variable group,
+  # named exactly "terraform-backend". See the setup note at the bottom of
+  # this file for exactly what to put in it.
+  - group: terraform-backend
+  - name: terraformVersion
+    value: "1.9.8" # satisfies this repo's required_version >= 1.7.0 constraint
+
+stages:
+  # ===========================================================================
+  # STAGE 1: Validate
+  # Runs on PRs too (fast feedback, no Azure credentials needed at all here -
+  # `-backend=false` means this never touches the real backend or state).
+  # ===========================================================================
+  - stage: Validate
+    displayName: "Terraform Validate & Format Check"
+    jobs:
+      - job: Validate_Environments
+        displayName: "fmt -check + validate (dev & prod)"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - script: |
+              set -euo pipefail
+              curl -sfL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+              unzip -o terraform.zip -d /usr/local/bin
+              terraform version
+            displayName: "Install Terraform $(terraformVersion)"
+
+          - script: |
+              set -euo pipefail
+              # -recursive covers modules/ too, not just the environment folders
+              terraform fmt -recursive -check -diff terraform/
+            displayName: "terraform fmt -check (fails if anything isn't formatted)"
+
+          - script: |
+              set -euo pipefail
+              cd terraform/environments/dev
+              terraform init -backend=false -input=false
+              terraform validate
+            displayName: "terraform validate - dev"
+
+          - script: |
+              set -euo pipefail
+              cd terraform/environments/prod
+              terraform init -backend=false -input=false
+              terraform validate
+            displayName: "terraform validate - prod"
+
+  # ===========================================================================
+  # STAGE 2: Plan_Dev
+  # Real plan against live Azure - this is what caught the
+  # virtual_network_integration_enabled bug locally that `validate` alone
+  # could never have found (validate only checks schema, not whether a
+  # valid-looking argument actually does what you think). Skipped on PRs -
+  # a PR from anyone shouldn't be able to touch real cloud state.
+  # ===========================================================================
+  - stage: Plan_Dev
+    displayName: "Plan - dev"
+    dependsOn: Validate
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - job: Plan
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - script: |
+              set -euo pipefail
+              curl -sfL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+              unzip -o terraform.zip -d /usr/local/bin
+            displayName: "Install Terraform"
+
+          - task: AzureCLI@2
+            displayName: "terraform init && plan (dev)"
+            inputs:
+              azureSubscription: "$(armServiceConnection)" # <-- set in the terraform-backend variable group
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                cd terraform/environments/dev
+                terraform init -input=false \
+                  -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                  -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                  -backend-config="container_name=$(tfStateContainer)" \
+                  -backend-config="key=dev/ecommerce.tfstate"
+                terraform plan -input=false -out=tfplan
+                terraform show -no-color tfplan > $(Build.ArtifactStagingDirectory)/dev-plan.txt
+
+          - publish: terraform/environments/dev/tfplan
+            artifact: tfplan-dev
+          - publish: $(Build.ArtifactStagingDirectory)/dev-plan.txt
+            artifact: dev-plan-readable # human-readable copy - open this one to actually review the plan in the pipeline run's Artifacts tab
+
+  # ===========================================================================
+  # STAGE 3: Apply_Dev
+  # A `deployment` job targeting an Azure DevOps Environment - this is the
+  # hook point for approvals. dev's is left optional/light (or none at all)
+  # since it's a low-risk, frequently-iterated environment; prod's below is
+  # mandatory. Re-running `terraform init` here is required (this is a fresh
+  # agent with no memory of Plan_Dev's working directory) but re-running
+  # `terraform plan` is NOT - applying the exact SAVED plan file from Plan_Dev
+  # guarantees prod gets exactly what a human reviewed, not a freshly
+  # recomputed plan that could differ if something changed in between.
+  # ===========================================================================
+  - stage: Apply_Dev
+    displayName: "Apply - dev"
+    dependsOn: Plan_Dev
+    condition: succeeded()
+    jobs:
+      - deployment: Apply
+        displayName: "terraform apply (dev)"
+        pool:
+          vmImage: "ubuntu-latest"
+        environment: "terraform-dev" # create under Pipelines > Environments; approvals configured there, not here
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    set -euo pipefail
+                    curl -sfL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+                    unzip -o terraform.zip -d /usr/local/bin
+                  displayName: "Install Terraform"
+
+                - download: current
+                  artifact: tfplan-dev
+
+                - task: AzureCLI@2
+                  displayName: "terraform init && apply tfplan (dev)"
+                  inputs:
+                    azureSubscription: "$(armServiceConnection)"
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      cd $(Build.SourcesDirectory)/terraform/environments/dev
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                        -backend-config="container_name=$(tfStateContainer)" \
+                        -backend-config="key=dev/ecommerce.tfstate"
+                      terraform apply -input=false "$(Pipeline.Workspace)/tfplan-dev/tfplan"
+
+  # ===========================================================================
+  # STAGE 4: Plan_Prod
+  # Only runs after dev's apply has actually succeeded - the same change
+  # gets promoted forward, never applied to prod independently/first.
+  # ===========================================================================
+  - stage: Plan_Prod
+    displayName: "Plan - prod"
+    dependsOn: Apply_Dev
+    condition: succeeded()
+    jobs:
+      - job: Plan
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - script: |
+              set -euo pipefail
+              curl -sfL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+              unzip -o terraform.zip -d /usr/local/bin
+            displayName: "Install Terraform"
+
+          - task: AzureCLI@2
+            displayName: "terraform init && plan (prod)"
+            inputs:
+              azureSubscription: "$(armServiceConnection)"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                cd terraform/environments/prod
+                terraform init -input=false \
+                  -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                  -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                  -backend-config="container_name=$(tfStateContainer)" \
+                  -backend-config="key=prod/ecommerce.tfstate"
+                terraform plan -input=false -out=tfplan
+                terraform show -no-color tfplan > $(Build.ArtifactStagingDirectory)/prod-plan.txt
+
+          - publish: terraform/environments/prod/tfplan
+            artifact: tfplan-prod
+          - publish: $(Build.ArtifactStagingDirectory)/prod-plan.txt
+            artifact: prod-plan-readable
+
+  # ===========================================================================
+  # STAGE 5: Apply_Prod
+  # THE gate. environment: terraform-prod must have a mandatory approval
+  # check configured in the Azure DevOps UI (see setup note below) - without
+  # that UI configuration, this stage would run unattended, which defeats
+  # the entire point of separating dev/prod in the first place.
+  # ===========================================================================
+  - stage: Apply_Prod
+    displayName: "Apply - prod"
+    dependsOn: Plan_Prod
+    condition: succeeded()
+    jobs:
+      - deployment: Apply
+        displayName: "terraform apply (prod)"
+        pool:
+          vmImage: "ubuntu-latest"
+        environment: "terraform-prod" # MUST have a mandatory approver configured - see setup note
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    set -euo pipefail
+                    curl -sfL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+                    unzip -o terraform.zip -d /usr/local/bin
+                  displayName: "Install Terraform"
+
+                - download: current
+                  artifact: tfplan-prod
+
+                - task: AzureCLI@2
+                  displayName: "terraform init && apply tfplan (prod)"
+                  inputs:
+                    azureSubscription: "$(armServiceConnection)"
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      cd $(Build.SourcesDirectory)/terraform/environments/prod
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                        -backend-config="container_name=$(tfStateContainer)" \
+                        -backend-config="key=prod/ecommerce.tfstate"
+                      terraform apply -input=false "$(Pipeline.Workspace)/tfplan-prod/tfplan"
+
+# =============================================================================
+# ONE-TIME AZURE DEVOPS SETUP (platform config, not expressible in this YAML)
+# -----------------------------------------------------------------------------
+# 1. Provision a real Storage Account + blob container to hold Terraform
+#    state (a small one-time manual step or tiny separate Terraform config -
+#    state can't describe the very storage account it's about to live in).
+#
+# 2. Project Settings > Service connections > New > Azure Resource Manager
+#    > Workload identity federation (preferred - no stored secret) or
+#    Service principal. Name it, then reference that exact name as the
+#    armServiceConnection variable below.
+#
+# 3. Pipelines > Library > + Variable group, named "terraform-backend",
+#    containing:
+#      armServiceConnection   = <the service connection name from step 2>
+#      tfStateResourceGroup   = <resource group the storage account lives in>
+#      tfStateStorageAccount  = <the storage account name from step 1>
+#      tfStateContainer       = <the blob container name, e.g. "tfstate">
+#
+# 4. Pipelines > Environments > New environment, named "terraform-dev".
+#    Optional: add an approval check if you want a human gate on dev too.
+#
+# 5. Pipelines > Environments > New environment, named "terraform-prod".
+#    REQUIRED: Approvals and checks > Approvals > add yourself (or your
+#    team) as a required approver. This is the actual prod safety gate -
+#    without this step, Apply_Prod runs unattended the moment Plan_Prod
+#    succeeds.
+# =============================================================================

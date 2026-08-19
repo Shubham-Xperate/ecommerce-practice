@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and adjust as needed -- terraform.tfvars itself
+# is gitignored. Every value below is already the default in variables.tf.
+
+location             = "swedencentral"
+resource_group_name  = "rg-poc-prod"
+acr_name             = "acrecommercepocprod"
+key_vault_name       = "kv-ecommercepoc-prod"
+aks_cluster_name     = "pocprodcluster"
+aks_node_count       = 3
+aks_node_vm_size     = "Standard_D4s_v5"
+aks_sku_tier         = "Standard"
