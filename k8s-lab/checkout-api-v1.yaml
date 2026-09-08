@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecom-prod
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-api-config
+  namespace: ecom-prod
+data:
+  PODINFO_UI_COLOR: "blue"
+  PODINFO_UI_MESSAGE: "checkout-api-v1"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: checkout-api-secret
+  namespace: ecom-prod
+type: Opaque
+stringData:
+  DB_PASSWORD: "SuperSecretPass123"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: ecom-prod
+  labels:
+    app: checkout-api
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 3
+  selector:
+    matchLabels:
+      app: checkout-api
+  template:
+    metadata:
+      labels:
+        app: checkout-api
+    spec:
+      containers:
+        - name: checkout-api
+          image: ghcr.io/stefanprodan/podinfo:6.7.0
+          ports:
+            - containerPort: 9898
+              name: http
+            - containerPort: 9797
+              name: metrics
+          envFrom:
+            - configMapRef:
+                name: checkout-api-config
+            - secretRef:
+                name: checkout-api-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9898
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9898
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-api
+  namespace: ecom-prod
+spec:
+  selector:
+    app: checkout-api
+  ports:
+    - port: 80
+      targetPort: 9898
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: checkout-api
+  namespace: ecom-prod
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: checkout-api
+                port:
+                  number: 80
